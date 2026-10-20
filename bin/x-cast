@@ -35,7 +35,8 @@ start_host() {
 }
 
 ipc() {
-  [[ -S $sock ]] || start_host
+  # A socket file left by a killed host refuses connections: replace it.
+  if ! nc -U -z "$sock" 2>/dev/null; then rm -f "$sock"; start_host; fi
   printf '%s\n' "$*" | nc -U -q0 "$sock"
 }
 
