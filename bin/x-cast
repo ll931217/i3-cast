@@ -20,7 +20,7 @@ Usage: x-cast <command> [args]
   call <method> [json]   Call a backend method, e.g. x-cast call system.info
   host                   Run the host in the foreground (logs on the terminal)
   search <text>          Open the launcher with a query
-  open <link>            Handle x-cast://run/<id>, x-cast://settings, x-cast://search?q=..., or a .rayconfig file
+  open <link>            Handle x-cast://run/<id>, x-cast://settings, x-cast://search?q=..., raycast://extensions/<owner>/<ext>/<command>, or a .rayconfig file
   import <file>          Import general settings from a Raycast .rayconfig export
   setup i3               Bind \$mod+d to the launcher in ~/.config/i3/config
   setup hotkeys          Bind the keys under hotkeys: in config.yaml to commands (i3)
@@ -76,10 +76,10 @@ Type=Application
 Name=x-cast links
 Exec=$bin open %u
 NoDisplay=true
-MimeType=x-scheme-handler/x-cast;application/x-rayconfig;
+MimeType=x-scheme-handler/x-cast;x-scheme-handler/raycast;application/x-rayconfig;
 DESKTOP
-  xdg-mime default x-cast-open.desktop x-scheme-handler/x-cast application/x-rayconfig
-  echo "x-cast: registered x-cast:// links and .rayconfig files ($apps/x-cast-open.desktop)"
+  xdg-mime default x-cast-open.desktop x-scheme-handler/x-cast x-scheme-handler/raycast application/x-rayconfig
+  echo "x-cast: registered x-cast://, raycast:// links and .rayconfig files ($apps/x-cast-open.desktop)"
 }
 
 urldecode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$1"; }
@@ -98,6 +98,21 @@ if d["skipped"]:
     print("x-cast: not imported (no home in x-cast yet): " + ", ".join("%s (%d)" % kv for kv in sorted(d["skipped"].items())))'
 }
 
+# raycast://extensions/<owner>/<ext>/<command>?arguments=... runs the local command with that name.
+cmd_open_raycast() {
+  local request reply query
+  request=$("$python" -c 'import json, sys; print(json.dumps({"url": sys.argv[1]}))' "$1")
+  reply=$(ipc call rootSearch.openLink "$request")
+  query=$(printf '%s' "$reply" | "$python" -c '
+import json, sys
+d = json.load(sys.stdin).get("data") or {}
+if d.get("unsupported"):
+    sys.exit(3)
+print(d.get("search", ""))') || { [[ $? -eq 3 ]] && die "not a command link x-cast can open: $1"; die "bad reply from the host: $reply"; }
+  [[ -n $query ]] && ipc search "$query" >/dev/null
+  return 0
+}
+
 cmd_open() {
   local link=${1:-}
   case $link in
@@ -107,7 +122,7 @@ cmd_open() {
     x-cast://*) die "unknown link $link" ;;
     file://*.rayconfig) cmd_import "$(urldecode "${link#file://}")" ;;
     *.rayconfig) cmd_import "$link" ;;
-    raycast://*) die "raycast:// extension links need Raycast's extension runtime, which x-cast does not have" ;;
+    raycast://*) cmd_open_raycast "$link" ;;
     *) die "usage: x-cast open <x-cast:// link or .rayconfig file>" ;;
   esac
 }

@@ -15,6 +15,7 @@ import "core/AppsProvider.js" as AppsProvider
 import "core/WebSearchProvider.js" as WebSearchProvider
 import "core/ExternalProvider.js" as ExternalProvider
 import "core/SettingsProvider.js" as SettingsProvider
+import "core/Links.js" as Links
 import "services"
 
 // The clone's backend, in-process (SPEC §2.0). It owns the paths, the host
@@ -321,6 +322,20 @@ Item {
         return RootSearch.actionsFor(candidate, Providers.actionsFor(backend.providerRegistry, candidate))
       },
       performAction: function(data) { return backend.performAction(data) },
+      // A raycast:// link: run the local command with the same slug, else ask for a search. [D]
+      openLink: function(data) {
+        var link = Links.parse(String(data && data.url || ""))
+        if (!link) return { unsupported: true }
+        var commands = settingsStore.doc.commands
+        var pool = backend.candidates.filter(function(c) { return !(commands[c.id] && commands[c.id].enabled === false) })
+        var hit = Links.resolve(pool, link)
+        if (!hit) return { search: link.command.replace(/-/g, " ") }
+        if (hit.missingArguments) return { search: hit.candidate.title }
+        var actions = Providers.actionsFor(backend.providerRegistry, hit.candidate)
+        if (!actions.length) return { search: hit.candidate.title }
+        var outcome = backend.performAction({ id: hit.candidate.id, action: actions[0].id, query: "", arguments: hit.arguments })
+        return outcome && outcome.close ? { opened: hit.candidate.title } : { search: hit.candidate.title }
+      },
       getSearchHistory: function() { return frecencyStore.loaded ? frecencyStore.doc.searchHistory : [] }
     })
 
