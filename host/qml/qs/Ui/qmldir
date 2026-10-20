@@ -1,0 +1,5 @@
+module qs.Ui
+singleton Border 1.0 Border.qml
+BorderSurface 1.0 BorderSurface.qml
+OverlayWindow 1.0 OverlayWindow.qml
+PointerMoveGate 1.0 PointerMoveGate.qml
