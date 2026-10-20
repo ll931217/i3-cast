@@ -658,7 +658,11 @@ OverlayWindow {
 
       ListView {
         id: list
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: answerPane.visible ? answerPane.left : parent.right
+        anchors.rightMargin: answerPane.visible ? window.px(8) : 0
         anchors.topMargin: window.px(4)
         anchors.bottomMargin: window.px(4)
         visible: window.view.kind !== "alias"
@@ -675,6 +679,59 @@ OverlayWindow {
           // pointer (open, typing, scrolling) must not steal the cursor.
           onHovered: function(i, item, mouse) { if (!window.actionPanelOpen && pointerGate.moved(item, mouse)) window.select(i) }
           onClicked: function(i) { window.perform("open", i) }
+        }
+      }
+
+      // The selected calculator row's answer, large. The list narrows to make room.
+      Rectangle {
+        id: answerPane
+        visible: window.view.kind !== "alias" && window.selectedRow !== null && window.selectedRow.answer
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.topMargin: window.px(4)
+        anchors.bottomMargin: window.px(4)
+        width: Math.round(parent.width * 0.46)
+        radius: Math.max(Style.cornerRadius, window.px(8))
+        color: Util.alpha(window.look.foreground, 0.05)
+
+        Column {
+          anchors.centerIn: parent
+          width: parent.width - window.px(40)
+          spacing: window.px(10)
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: window.selectedRow ? window.selectedRow.subtitle : ""
+            elide: Text.ElideLeft
+            color: window.look.foreground
+            opacity: 0.55
+            font.family: window.look.fontFamily
+            font.pixelSize: Math.round(Style.font.body * window.zoom)
+          }
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: window.selectedRow ? window.selectedRow.title : ""
+            fontSizeMode: Text.HorizontalFit
+            minimumPixelSize: Math.round(Style.font.title * window.zoom)
+            color: window.look.foreground
+            font.family: window.look.fontFamily
+            font.bold: true
+            font.pixelSize: Math.round(Style.font.heading * 2.6 * window.zoom)
+          }
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: "Answer"
+            color: window.look.accent
+            font.family: window.look.fontFamily
+            font.pixelSize: Math.round(Style.font.bodySmall * window.zoom)
+          }
         }
       }
 

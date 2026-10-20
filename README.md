@@ -102,7 +102,7 @@ Behaviour comes from a static reverse-engineering pass over Raycast; see `SPEC.m
 ## Plugins and settings
 
 - Drop a Python file in `~/.config/x-cast/plugins/` to add commands. See [docs/plugins.md](docs/plugins.md).
-- A calculator is built in. Type `2+2`, `sqrt(16)*3`, `20% of 50` or `100 + 10%` and the answer shows above the results. Enter copies it. For degrees, set `plugins: {calculator: {angle_unit: degrees}}` in `config.yaml`.
+- A calculator is built in. Type `2+2`, `sqrt(16)*3`, `20% of 50` or `100 + 10%` and the answer shows above the results. The selected answer also shows in large type on the right, and copied calculations stay in a History list (last 20, in `~/.local/share/x-cast/calculator-history.json`). Enter copies it. For degrees, set `plugins: {calculator: {angle_unit: degrees}}` in `config.yaml`.
 - Script Commands (Raycast format) work out of the box from `~/.config/x-cast/script-commands`.
 - `x-cast settings` opens the settings window (also the "x-cast Settings" command). A value set in `config.yaml` wins and locks its row.
 - Tab moves into argument pills. Ctrl+P opens the type filter. Ctrl+T opens the toast's actions.

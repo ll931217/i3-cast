@@ -118,3 +118,11 @@ test("answers come first in a query's sections, without a title, and have only t
   assert.strictEqual(sections[0].rows[0].candidate, answer)
   assert.deepStrictEqual(RootSearch.actionsFor(answer, [{ id: "copy", title: "Copy" }]).map(a => a.id), ["copy"])
 })
+
+test("answer rows group by section: current first, then History", () => {
+  const Ranker = require("../plugin/core/Ranker.js")
+  const Frecency = require("../plugin/core/Frecency.js")
+  const rows = [{ id: "c:answer", answer: true }, { id: "c:h0", answer: true, section: "History" }, { id: "c:h1", answer: true, section: "History" }]
+  const sections = RootSearch.rootSections([], "2+2", { nowMs: 0, answers: () => rows, fallbacks: () => [] }, { Ranker, Frecency })
+  assert.deepStrictEqual(sections.map(s => [s.id, s.title, s.rows.length]), [["answers", "", 1], ["answers:history", "History", 2]])
+})

@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,9 +54,13 @@ class EvaluateTests(unittest.TestCase):
 
 
 class FakeApi:
-    def __init__(self, settings=None):
+    def __init__(self, settings=None, data_dir=None):
         self._settings = settings or {}
+        self._data_dir = Path(data_dir or tempfile.mkdtemp())
         self.copied = []
+
+    def data_dir(self):
+        return self._data_dir
 
     def settings(self, _id):
         return self._settings
@@ -76,6 +81,29 @@ class ProviderTests(unittest.TestCase):
         provider.perform(candidate, "copy-equation", {})
         self.assertEqual(api.copied, ["10", "20% of 50 = 10"])
         self.assertIsNone(provider.perform(candidate, "nope", {}))
+
+    def test_copied_answers_become_history_rows_below_the_current_one(self):
+        api = FakeApi()
+        provider = calc.Calculator(api)
+        provider.perform(provider.answers("2+2")[0], "copy", {})
+        provider.perform(provider.answers("3*3")[0], "copy", {})
+        rows = provider.answers("10-1")
+        self.assertEqual([(r["title"], r.get("section", "")) for r in rows], [("9", ""), ("9", "History"), ("4", "History")])
+        self.assertEqual([r["title"] for r in provider.answers("3*3")], ["9", "4"])  # no duplicate of the current one
+
+    def test_history_survives_a_restart_and_is_capped(self):
+        api = FakeApi()
+        first = calc.Calculator(api)
+        for i in range(30):
+            first.remember("%d+1" % i, str(i + 1))
+        again = calc.Calculator(api)
+        self.assertEqual(len(again.history), calc.HISTORY_LIMIT)
+        self.assertEqual(again.history[0]["expression"], "29+1")
+
+    def test_a_broken_history_file_is_ignored(self):
+        api = FakeApi()
+        (api.data_dir() / "calculator-history.json").write_text("not json")
+        self.assertEqual(calc.Calculator(api).history, [])
 
     def test_angle_unit_setting(self):
         self.assertEqual(calc.Calculator(FakeApi({"angle_unit": "degrees"})).answers("sin(90)")[0]["title"], "1")

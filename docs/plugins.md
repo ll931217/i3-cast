@@ -35,6 +35,7 @@ def register(api):
 | `glyph` | A Nerd Font glyph, used when there is no icon. |
 | `arguments` | Up to three pills: `{"placeholder", "type": "text" or "password" or "dropdown", "optional", "data": [options]}`. |
 | `data` | Anything JSON. It comes back to you in `actions_for` and `perform`. |
+| `section` | For `answers()` rows: a section title such as `History`. Rows without one come first, untitled. |
 | `category` | Which of your `filters()` entries this row belongs to. |
 | `root` | `"always"` (default), `"searching"` (only when a query is typed) or `"empty"`. |
 
@@ -67,6 +68,7 @@ An exception in `perform` is caught and shown as a failure toast with a "Copy Er
 |---|---|
 | `api.add_provider(provider)` | Register a provider. |
 | `api.settings(provider_id)` | Your section of `config.yaml`: `plugins: {<id>: {...}}`. |
+| `api.data_dir()` | `~/.local/share/x-cast` as a `Path`, for state you keep (the calculator's history). |
 | `api.config_dir()` | `~/.config/x-cast` as a `Path`. |
 | `api.watch(path)` | Refresh the rows when this file or folder changes. |
 | `api.changed()` | Refresh the rows now. |

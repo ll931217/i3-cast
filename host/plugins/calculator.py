@@ -9,11 +9,13 @@ A bare number or a word is never an answer, so searching for "7-zip" or "e" is u
 The expression is parsed with `ast` and walked by hand. Nothing is ever passed to eval().
 """
 import ast
+import json
 import math
 import operator
 import re
 
 MAX_QUERY = 200
+HISTORY_LIMIT = 20
 MAX_EXPONENT = 1000
 SIGNIFICANT_DIGITS = 12
 
@@ -118,6 +120,25 @@ class Calculator:
 
     def __init__(self, api):
         self.api = api
+        self.history_file = api.data_dir() / "calculator-history.json"
+        self.history = self.load_history()
+
+    def load_history(self):
+        try:
+            rows = json.loads(self.history_file.read_text())
+        except (OSError, ValueError):
+            return []
+        return [r for r in rows if isinstance(r, dict) and isinstance(r.get("expression"), str)
+                and isinstance(r.get("answer"), str)][:HISTORY_LIMIT]
+
+    def remember(self, expression, answer):
+        self.history = ([{"expression": expression, "answer": answer}]
+                        + [r for r in self.history if r["expression"] != expression])[:HISTORY_LIMIT]
+        try:
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+            self.history_file.write_text(json.dumps(self.history))
+        except OSError:
+            pass  # history is a convenience; copying still works
 
     def degrees(self):
         return str(self.api.settings(self.id).get("angle_unit", "radians")) == "degrees"
@@ -131,10 +152,17 @@ class Calculator:
             return []
         value, expression = found
         answer = format_number(value)
-        return [{
+        rows = [{
             "id": "answer", "title": answer, "subtitle": expression + " =", "type_label": "Calculator",
             "glyph": "", "keywords": [], "data": {"answer": answer, "expression": expression},
         }]
+        for i, past in enumerate(r for r in self.history if r["expression"] != expression):
+            rows.append({
+                "id": "history-%d" % i, "title": past["answer"], "subtitle": past["expression"] + " =",
+                "type_label": "History", "glyph": "\uf1da", "section": "History", "keywords": [],
+                "data": dict(past),
+            })
+        return rows
 
     def actions_for(self, candidate):
         return [
@@ -151,6 +179,7 @@ class Calculator:
         else:
             return None
         self.api.copy(text)
+        self.remember(data["expression"], data["answer"])
         return {"close": True, "hud": "Copied " + text}
 
 

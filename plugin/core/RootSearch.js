@@ -51,7 +51,15 @@ function rootSections(candidates, query, ctx, deps) {
     var results = deps.Ranker.rank(searchable, q, opts)
     var sections = []
     var answers = typeof ctx.answers === "function" ? ctx.answers(q) : []
-    if (answers.length) sections.push({ id: "answers", title: "", rows: answers.map(function(candidate) { return { candidate: candidate, record: null } }) })
+    // Answer rows group by their `section` title: the current answer first, then e.g. "History".
+    var answerGroups = []
+    answers.forEach(function(candidate) {
+      var title = candidate.section || ""
+      var group = answerGroups.filter(function(g) { return g.title === title })[0]
+      if (!group) { group = { id: "answers" + (title ? ":" + title.toLowerCase() : ""), title: title, rows: [] }; answerGroups.push(group) }
+      group.rows.push({ candidate: candidate, record: null })
+    })
+    answerGroups.forEach(function(g) { sections.push(g) })
     if (results.length > 0) sections.push({ id: "results", title: "Results", rows: results })
     var fallbacks = fallbackRows(q, ctx)
     if (fallbacks.length) sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbacks })

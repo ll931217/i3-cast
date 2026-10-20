@@ -14,6 +14,7 @@ A provider (duck-typed, see docs/plugins.md) has:
 """
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -58,6 +59,7 @@ def normalize_candidate(provider_id, raw, searching_only=False):
         "glyph": str(raw.get("glyph") or ""),
         "arguments": normalize_arguments(raw.get("arguments")),
         "category": str(raw.get("category") or ""),
+        "section": str(raw.get("section") or ""),
         "data": raw.get("data"),
         "rootSearch": {"when": "searching" if searching_only else raw.get("root", "always")},
     }
@@ -79,6 +81,10 @@ class Api:
 
     def config_dir(self):
         return self._host.config_dir
+
+    def data_dir(self):
+        """$XDG_DATA_HOME/x-cast as a Path, for state a plugin keeps."""
+        return self._host.data_dir
 
     def watch(self, path):
         """Rebuild root search when `path` (file or directory) changes."""
@@ -109,6 +115,8 @@ class PluginHost(QObject):
     def __init__(self, config_dir, settings_source, parent=None):
         super().__init__(parent)
         self.config_dir = Path(config_dir)
+        base = os.environ.get("XDG_DATA_HOME")
+        self.data_dir = Path(base if base and base.startswith("/") else Path.home() / ".local" / "share") / "x-cast"
         self._settings_source = settings_source
         self._providers = {}
         self._errors = []
