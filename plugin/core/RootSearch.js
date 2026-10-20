@@ -122,12 +122,31 @@ function reorderFavorites(commands, id, action) {
   return out
 }
 
+// Root view dropdown (Ctrl+P): one entry per candidate type, "All" first. [D]
+function typeFilters(candidates) {
+  var seen = {}
+  var labels = []
+  for (var i = 0; i < candidates.length; i++) {
+    var label = candidates[i].typeLabel
+    if (label && !seen[label]) { seen[label] = true; labels.push(label) }
+  }
+  labels.sort()
+  return [{ id: "", title: "All" }].concat(labels.map(function(label) { return { id: label, title: label } }))
+}
+
+function filterByType(candidates, typeId) {
+  if (!typeId) return candidates
+  return candidates.filter(function(c) { return c.typeLabel === typeId })
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     SUGGESTIONS_LIMIT: SUGGESTIONS_LIMIT,
     decorate: decorate,
     rootSections: rootSections,
     actionsFor: actionsFor,
-    reorderFavorites: reorderFavorites
+    reorderFavorites: reorderFavorites,
+    typeFilters: typeFilters,
+    filterByType: filterByType
   }
 }
