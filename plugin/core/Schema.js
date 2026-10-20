@@ -17,8 +17,7 @@ var settingsMigrations = [
         escapeKeyBehavior: "pop-back-or-close",   // pop-back-or-close | close-and-pop-to-root
         navigationBindings: "emacs",              // emacs | vim-motions
         rootSearchSensitivity: "medium",          // low | medium | high; backend default [O], SPEC §7.3
-        uiZoom: 1,
-        theme: "omarchy"                          // [D] follow the active Omarchy theme
+        uiZoom: 1
       }
       doc.commands = {}                           // commandId -> {enabled, alias, hotkey, favoriteOrder, fallbackOrder, meta}
       return doc
@@ -57,21 +56,55 @@ var documents = {
   frecency: { file: "frecency.json", migrations: frecencyMigrations }
 }
 
-// Host flags in $XDG_CONFIG_HOME/x-cast/config.json: user-editable and
-// non-secret (SPEC §6.3). Not migrated; unknown keys are kept and ignored,
-// missing ones fall back to these defaults.
+// User options from $XDG_CONFIG_HOME/x-cast/config.yaml (the host parses the
+// YAML and hands over camelCased keys). Not migrated; unknown keys are ignored,
+// missing or wrongly typed ones fall back to these defaults.
 var configDefaults = {
   logLevel: "info",                    // trace | debug | info | warning | error | fatal
-  keepVisibleOnFocusLoss: false        // dev aid (keepMainWindowVisibleOnResignKey)
+  keepVisibleOnFocusLoss: false,       // dev aid (keepMainWindowVisibleOnResignKey)
+  general: {},                         // overrides for the general settings above, same key names
+  fallbacks: null                      // [{title, url}] with {query} in url; null keeps the built-in list
+}
+
+var generalTypes = {
+  windowMode: ["expanded", "compact"],
+  windowPresentationMode: ["mouse-screen", "active-screen", "primary-screen"],
+  escapeKeyBehavior: ["pop-back-or-close", "close-and-pop-to-root"],
+  navigationBindings: ["emacs", "vim-motions"],
+  rootSearchSensitivity: ["low", "medium", "high"]
+}
+
+// Keep only general overrides that match the shipped defaults in type (and enum value).
+function validGeneral(value, defaults) {
+  var out = {}
+  if (!value || typeof value !== "object") return out
+  for (var k in value) {
+    if (defaults[k] === undefined || typeof value[k] !== typeof defaults[k]) continue
+    if (generalTypes[k] && generalTypes[k].indexOf(value[k]) < 0) continue
+    out[k] = value[k]
+  }
+  return out
+}
+
+function validFallbacks(list) {
+  if (!Array.isArray(list)) return null
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var f = list[i]
+    if (!f || typeof f.title !== "string" || typeof f.url !== "string" || f.url.indexOf("{query}") < 0) continue
+    out.push({ id: "fallback:" + out.length, title: f.title, icon: "", url: f.url })
+  }
+  return out.length ? out : null
 }
 
 function withConfigDefaults(value) {
   var out = {}
   for (var key in configDefaults) out[key] = configDefaults[key]
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    for (var k in value) {
-      if (configDefaults[k] !== undefined && typeof value[k] === typeof configDefaults[k]) out[k] = value[k]
-    }
+    if (typeof value.logLevel === "string") out.logLevel = value.logLevel
+    if (typeof value.keepVisibleOnFocusLoss === "boolean") out.keepVisibleOnFocusLoss = value.keepVisibleOnFocusLoss
+    out.general = validGeneral(value.general, settingsMigrations[0].up({}).general)
+    out.fallbacks = validFallbacks(value.fallbacks)
   }
   return out
 }
@@ -84,6 +117,7 @@ if (typeof module !== "undefined") {
     SEARCH_HISTORY_LIMIT: SEARCH_HISTORY_LIMIT,
     documents: documents,
     configDefaults: configDefaults,
-    withConfigDefaults: withConfigDefaults
+    withConfigDefaults: withConfigDefaults,
+    validFallbacks: validFallbacks
   }
 }

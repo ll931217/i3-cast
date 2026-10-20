@@ -7,7 +7,7 @@ const envOf = (vars) => (name) => vars[name] || ""
 test("defaults follow the XDG base directory spec", () => {
   const p = Paths.resolve(envOf({ HOME: "/home/u", XDG_RUNTIME_DIR: "/run/user/1000" }))
   assert.equal(p.config, "/home/u/.config/x-cast")
-  assert.equal(p.configFile, "/home/u/.config/x-cast/config.json")
+  assert.equal(p.configFile, "/home/u/.config/x-cast/config.yaml")
   assert.equal(p.db, "/home/u/.local/share/x-cast/db")
   assert.equal(p.extensions, "/home/u/.local/share/x-cast/extensions")
   assert.equal(p.cache, "/home/u/.cache/x-cast")

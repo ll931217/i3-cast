@@ -2,10 +2,9 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const Ranker = require("../plugin/core/Ranker.js")
 const Frecency = require("../plugin/core/Frecency.js")
-const OmarchyMenu = require("../plugin/core/OmarchyMenu.js")
 const RS = require("../plugin/core/RootSearch.js")
 
-const deps = { Ranker, Frecency, OmarchyMenu }
+const deps = { Ranker, Frecency }
 const NOW = Date.UTC(2026, 9, 19, 12)
 
 const apps = ["firefox", "chromium", "signal-desktop", "org.gnome.Nautilus", "Alacritty", "libreoffice-writer"].map((id) => ({
@@ -16,21 +15,8 @@ const apps = ["firefox", "chromium", "signal-desktop", "org.gnome.Nautilus", "Al
   icon: id
 }))
 
-const menu = OmarchyMenu.buildTree(OmarchyMenu.parse(`{
-  "system": {"label":"System"},
-  "system.lock": {"icon":"l","label":"Lock","action":"omarchy-system-lock"},
-  "system.shutdown": {"label":"Shutdown","action":"omarchy-system shutdown"},
-  "trigger": {"label":"Trigger"},
-  "trigger.toggle": {"label":"Toggle"},
-  "trigger.toggle.nightlight": {"label":"Nightlight","action":"omarchy-toggle-nightlight"},
-  "style": {"label":"Style"},
-  "style.font": {"label":"Font","provider":"fonts"}
-}`).items, [])
-
-function candidates(guards, providerItems) {
+function candidates() {
   return apps.map(RS.appCandidate)
-    .concat(RS.menuCandidates(menu, guards || { when: {}, checked: {}, disabled: {} }, providerItems || {}, deps))
-    .concat(RS.BUILTINS.map(RS.builtinCandidate))
 }
 
 function ctx(extra) {
@@ -69,50 +55,27 @@ test("launching bumps frecency and teaches the query (Phase 1 accept)", () => {
   assert.deepEqual(titles(results("web", c)[0]).slice(0, 2), ["Firefox", "Chromium"])
 })
 
-test("deep Omarchy items only appear while searching, with breadcrumbs", () => {
-  const empty = results("")
-  const all = empty.flatMap((s) => s.rows.map((r) => r.candidate.title))
-  assert.ok(all.includes("System") && all.includes("Trigger"))
-  assert.ok(!all.includes("Nightlight"))
-  const night = results("nightlight")[0].rows[0].candidate
-  assert.equal(night.title, "Nightlight")
-  assert.equal(night.subtitle, "Trigger › Toggle")
-  assert.equal(night.kind, "omarchy-action")
-})
-
-test("empty root: favorites, suggestions, commands, applications", () => {
+test("empty root: favorites, suggestions, applications", () => {
   const c = ctx({
-    commands: { "omarchy:system.lock": { favoriteOrder: 0 } },
+    commands: { "app:firefox": { favoriteOrder: 0 } },
     frecency: { "app:signal-desktop": Frecency.recordVisit(null, NOW - 1000, "") }
   })
   const sections = results("", c)
-  assert.deepEqual(sections.map((s) => s.id), ["favorites", "suggestions", "commands", "apps"])
-  assert.deepEqual(titles(sections[0]), ["Lock"])
+  assert.deepEqual(sections.map((s) => s.id), ["favorites", "suggestions", "apps"])
+  assert.deepEqual(titles(sections[0]), ["Firefox"])
   assert.deepEqual(titles(sections[1]), ["Signal"])
-  assert.ok(!titles(sections[3]).includes("Signal"), "suggested apps are not repeated")
+  assert.ok(!titles(sections[2]).includes("Signal"), "suggested apps are not repeated")
 })
 
-test("hidden menu rows (when: false) and disabled commands are left out", () => {
-  const sections = RS.rootSections(candidates({ when: { "system.shutdown": false }, checked: {}, disabled: {} }), "shutdown", ctx(), deps)
-  assert.equal(sections[0].id, "fallback-commands")
+test("disabled commands are left out", () => {
   const off = results("signal", ctx({ commands: { "app:signal-desktop": { enabled: false } } }))
   assert.ok(!off.some((s) => s.id === "results" && titles(s).includes("Signal")))
 })
 
-test("a submenu lists its children, and searches its descendants", () => {
-  const children = RS.submenuSections(candidates(), "trigger", "", ctx(), deps)
-  assert.deepEqual(titles(children[0]), ["Toggle"])
-  const found = RS.submenuSections(candidates(), "trigger", "night", ctx(), deps)
-  assert.deepEqual(titles(found[0]), ["Nightlight"])
-})
-
-test("provider rows are searchable under their menu", () => {
-  const rows = OmarchyMenu.providerItems("style.font", "fonts", "Iosevka\tIosevka\tIosevka\n")
-  const sections = RS.rootSections(candidates(null, { "style.font": rows }), "iosevka", ctx(), deps)
-  const hit = sections[0].rows[0].candidate
-  assert.equal(hit.title, "Iosevka")
-  assert.equal(hit.subtitle, "Style › Font")
-  assert.equal(hit.checked, true)
+test("configured fallbacks replace the built-in ones", () => {
+  const fallbacks = [{ id: "fallback:0", title: "Search Kagi", icon: "", url: "https://kagi.com/search?q={query}" }]
+  const sections = results("zzzz-nothing", ctx({ fallbacks }))
+  assert.deepEqual(titles(sections[0]), ["Search Kagi"])
 })
 
 test("actions: primary first, favourites and alias offered", () => {
@@ -120,8 +83,6 @@ test("actions: primary first, favourites and alias offered", () => {
   const ids = RS.actionsFor(app).map((a) => a.id)
   assert.equal(ids[0], "open")
   assert.ok(ids.includes("favorite-add") && ids.includes("set-alias") && ids.includes("copy-id"))
-  const menuItem = RS.decorate(candidates().find((c) => c.id === "omarchy:system.lock"), ctx(), deps)
-  assert.deepEqual(RS.actionsFor(menuItem).slice(0, 2).map((a) => a.id), ["open", "open-in-omarchy-menu"])
 })
 
 test("favourite reordering", () => {

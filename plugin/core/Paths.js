@@ -24,7 +24,8 @@ function resolve(env) {
   return {
     home: home,
     config: config,
-    configFile: config + "/config.json",
+    configFile: config + "/config.yaml",
+    themeFile: config + "/theme.yaml",
     scriptCommands: config + "/script-commands",
     data: data,
     db: data + "/db",

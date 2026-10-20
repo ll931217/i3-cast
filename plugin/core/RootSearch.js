@@ -5,27 +5,11 @@
 
 var SUGGESTIONS_LIMIT = 6            // [I] SPEC §7.2 "N≈6"
 
-// Fallback commands, in default fallback order [O names, D URLs].
+// Default fallback commands, in order [O names, D URLs]. config.yaml may replace them.
 var FALLBACKS = [
   { id: "fallback:google", title: "Search Google", icon: "", url: "https://www.google.com/search?q={query}" },
   { id: "fallback:duckduckgo", title: "Search DuckDuckGo", icon: "", url: "https://duckduckgo.com/?q={query}" }
 ]
-
-// Built-in commands of our own (the declarative catalog; grows per phase).
-var BUILTINS = [
-  {
-    id: "builtin:omarchy-menu",
-    title: "Omarchy Menu",
-    subtitle: "Open the original Omarchy menu",
-    keywords: ["menu", "omarchy"],
-    run: { summon: "omarchy.menu", payload: "{\"menu\":\"root\"}" },
-    rootSearch: { when: "always" }
-  }
-]
-
-function words(value) {
-  return String(value || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[._:/\\-]+/g, " ").trim()
-}
 
 function appCandidate(entry) {
   var desktopId = String(entry.id || "")
@@ -47,72 +31,6 @@ function appCandidate(entry) {
     iconName: String(entry.icon || ""),
     rootSearch: { when: "always" }
   }
-}
-
-// One Omarchy menu item. Top-level menus show on the empty root ("Commands");
-// deeper items only while searching, or the root would list ~400 rows.
-function menuCandidate(tree, item, guards, deps) {
-  var crumbs = deps.OmarchyMenu.breadcrumb(tree, item.id)
-  var keywords = item.aliases.map(words).filter(function(k) { return k })
-  if (item.title && item.title !== item.label) keywords.push(item.title)
-  if (item.description) keywords.push(item.description)
-  return {
-    id: "omarchy:" + item.id,
-    type: "command",
-    kind: item.kind === "action" ? "omarchy-action" : (item.kind === "link" ? "omarchy-link" : "omarchy-menu"),
-    title: item.label,
-    subtitle: crumbs.length > 0 ? crumbs.join(" › ") : "Omarchy",
-    keywords: keywords,
-    typeLabel: item.kind === "action" ? "Command" : "Menu",
-    menuId: item.id,
-    action: item.action,
-    target: item.target,
-    provider: item.provider,
-    glyph: item.icon,
-    glyphFont: item.iconFont,
-    checked: !!(item.isCurrent || (guards && guards.checked && guards.checked[item.id])),
-    disabled: !!(guards && guards.disabled && guards.disabled[item.id]),
-    rootSearch: { when: crumbs.length === 0 ? "always" : "searching" }
-  }
-}
-
-function builtinCandidate(def) {
-  return {
-    id: def.id,
-    type: "command",
-    kind: "builtin",
-    title: def.title,
-    subtitle: def.subtitle || "",
-    keywords: def.keywords || [],
-    typeLabel: "Command",
-    glyph: "",
-    glyphFont: "omarchy",
-    run: def.run,
-    rootSearch: def.rootSearch || { when: "always" }
-  }
-}
-
-// All Omarchy rows that are visible under the current guard answers, plus
-// rows from runtime providers (fonts, power profiles).
-function menuCandidates(tree, guards, providerItems, deps) {
-  var out = []
-  for (var i = 0; i < tree.order.length; i++) {
-    var item = tree.items[tree.order[i]]
-    if (!deps.OmarchyMenu.isVisible(tree, guards, item.id)) continue
-    out.push(menuCandidate(tree, item, guards, deps))
-  }
-  var extra = providerItems || {}
-  for (var menuId in extra) {
-    if (!tree.items[menuId] || !deps.OmarchyMenu.isVisible(tree, guards, menuId)) continue
-    for (var j = 0; j < extra[menuId].length; j++) {
-      var row = extra[menuId][j]
-      var withTree = { items: tree.items, order: tree.order, children: tree.children }
-      withTree.items = Object.create(tree.items)
-      withTree.items[row.id] = row
-      out.push(menuCandidate(withTree, row, guards, deps))
-    }
-  }
-  return out
 }
 
 // Attach per-user metadata. Returns new objects; inputs stay untouched.
@@ -138,8 +56,8 @@ function rankOptions(ctx) {
   return { sensitivity: ctx.sensitivity || "medium", nowMs: ctx.nowMs }
 }
 
-function fallbackRows(query) {
-  return FALLBACKS.map(function(f) {
+function fallbackRows(query, fallbacks) {
+  return (fallbacks || FALLBACKS).map(function(f) {
     return {
       candidate: {
         id: f.id, type: "command", kind: "fallback", title: f.title, subtitle: query,
@@ -167,7 +85,7 @@ function rootSections(candidates, query, ctx, deps) {
     var results = deps.Ranker.rank(searchable, q, opts)
     var sections = []
     if (results.length > 0) sections.push({ id: "results", title: "Results", rows: results })
-    sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbackRows(q) })
+    sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbackRows(q, ctx.fallbacks) })
     return sections
   }
 
@@ -193,25 +111,6 @@ function rootSections(candidates, query, ctx, deps) {
   return out
 }
 
-// A pushed Omarchy submenu: its visible children in menu order, or, while
-// searching, every descendant ranked (the Omarchy menu searches the same way).
-function submenuSections(candidates, menuId, query, ctx, deps) {
-  var prefix = "omarchy:" + menuId + "."
-  var q = String(query || "").trim()
-  var inside = []
-  for (var i = 0; i < candidates.length; i++) {
-    var c = candidates[i]
-    if (c.id.indexOf(prefix) !== 0 || !isEnabled(c, ctx)) continue
-    var rest = c.id.slice(prefix.length)
-    if (!q && rest.indexOf(".") >= 0) continue
-    inside.push(decorate(c, ctx, deps))
-  }
-  // Unfiltered children all share the breadcrumb of the open menu; drop it.
-  if (!q) return inside.length ? [{ id: "menu", title: "", rows: inside.map(function(c) { c.subtitle = ""; return { candidate: c, record: null } }) }] : []
-  var ranked = deps.Ranker.rank(inside, q, rankOptions(ctx))
-  return ranked.length ? [{ id: "results", title: "Results", rows: ranked }] : []
-}
-
 // Actions for a row (SPEC §10.2 action panel, §10.3 shortcuts). The first is
 // primary (↵), the second secondary (Ctrl ↵).
 function actionsFor(candidate) {
@@ -219,9 +118,6 @@ function actionsFor(candidate) {
   var list = []
   switch (candidate.kind) {
     case "app": primary = { id: "open", title: "Open Application", icon: "" }; break
-    case "omarchy-action": primary = { id: "open", title: "Run", icon: "" }; break
-    case "omarchy-menu":
-    case "omarchy-link": primary = { id: "open", title: "Open Menu", icon: "" }; break
     case "fallback": primary = { id: "open", title: candidate.title, icon: "" }; break
     default: primary = { id: "open", title: "Open Command", icon: "" }
   }
@@ -229,12 +125,9 @@ function actionsFor(candidate) {
   primary.section = "primary"
   list.push(primary)
 
-  if (candidate.kind && candidate.kind.indexOf("omarchy-") === 0)
-    list.push({ id: "open-in-omarchy-menu", title: "Open in Omarchy Menu", shortcut: "Ctrl ↵", section: "primary", icon: "" })
   if (candidate.kind === "fallback") return list
 
   if (candidate.kind === "app") list.push({ id: "copy-id", title: "Copy Desktop ID", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
-  if (candidate.kind === "omarchy-action") list.push({ id: "copy-command", title: "Copy Command", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
 
   if (candidate.favoriteOrder === null || candidate.favoriteOrder === undefined) {
     list.push({ id: "favorite-add", title: "Add to Favorites", shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
@@ -275,14 +168,9 @@ if (typeof module !== "undefined") {
   module.exports = {
     SUGGESTIONS_LIMIT: SUGGESTIONS_LIMIT,
     FALLBACKS: FALLBACKS,
-    BUILTINS: BUILTINS,
     appCandidate: appCandidate,
-    menuCandidate: menuCandidate,
-    menuCandidates: menuCandidates,
-    builtinCandidate: builtinCandidate,
     decorate: decorate,
     rootSections: rootSections,
-    submenuSections: submenuSections,
     actionsFor: actionsFor,
     reorderFavorites: reorderFavorites,
     fallbackUrl: fallbackUrl
