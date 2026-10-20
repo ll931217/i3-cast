@@ -20,6 +20,17 @@ A Raycast-style launcher for X11 window managers (i3). It learns what you use, r
   </tr>
 </table>
 
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/calculator.png" alt="The built-in calculator: the answer in large type, with history"></td>
+    <td width="50%"><img src="docs/screenshots/plugins.png" alt="The Plugins page in the settings window"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Calculator with history</b></td>
+    <td align="center"><b>Add, turn off and remove plugins</b></td>
+  </tr>
+</table>
+
 Six themes from `theme.yaml` (the palettes are in `docs/capture.sh`):
 
 <img src="docs/screenshots/themes.png" alt="x-cast in six color themes">
@@ -101,7 +112,7 @@ Behaviour comes from a static reverse-engineering pass over Raycast; see `SPEC.m
 
 ## Plugins and settings
 
-- Drop a Python file in `~/.config/x-cast/plugins/` to add commands. See [docs/plugins.md](docs/plugins.md).
+- Add a plugin from the settings window (`x-cast settings`, Plugins page): paste a path or `https://` link to a `.py` file. Or drop the file in `~/.config/x-cast/plugins/`. Turn any plugin off with its button, or remove one you added. The `?` button opens [docs/plugins.md](docs/plugins.md). To turn one off in `config.yaml`: `plugins: {calculator: {enabled: false}}`; that wins over the button.
 - A calculator is built in. Type `2+2`, `sqrt(16)*3`, `20% of 50` or `100 + 10%` and the answer shows above the results. The selected answer also shows in large type on the right, and copied calculations stay in a History list (last 20, in `~/.local/share/x-cast/calculator-history.json`). Enter copies it. For degrees, set `plugins: {calculator: {angle_unit: degrees}}` in `config.yaml`.
 - Script Commands (Raycast format) work out of the box from `~/.config/x-cast/script-commands`.
 - `x-cast settings` opens the settings window (also the "x-cast Settings" command). A value set in `config.yaml` wins and locks its row.

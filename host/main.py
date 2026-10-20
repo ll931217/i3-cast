@@ -91,7 +91,8 @@ def main():
     extensions = plugins.PluginHost(userconfig.config_dir(), lambda: user.config)
     extensions.notice.connect(lambda style, text: subprocess.Popen(
         ["notify-send", "-a", "x-cast", "-u", "critical" if style == "failure" else "normal", text]))
-    extensions.load_all(HERE / "plugins", userconfig.config_dir() / "plugins")
+    extensions.load_all(HERE / "plugins", bundled=True)
+    extensions.load_all(extensions.plugin_dir)
     qmlRegisterSingletonInstance(plugins.PluginHost, "OmaHost", 1, 0, "PluginHost", extensions)
     host = apps.Host()
     qmlRegisterSingletonInstance(apps.Host, "OmaHost", 1, 0, "Host", host)
