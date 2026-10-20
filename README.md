@@ -26,7 +26,7 @@ Six themes from `theme.yaml` (the palettes are in `docs/capture.sh`):
 
 ## Install
 
-Needs Python 3.10+, `nc` (netcat-openbsd), `xclip`, `xdg-open` and `notify-send`.
+Needs Python 3.11+, `nc` (netcat-openbsd), `xclip`, `xdg-open` and `notify-send`.
 
 ```sh
 git clone https://github.com/ll931217/i3-cast.git && cd i3-cast
@@ -53,6 +53,7 @@ fallbacks:
 
 ```yaml
 # theme.yaml
+from_alacritty: ~/.config/alacritty/amp.toml   # optional: take the colors from an Alacritty theme
 colors:
   background: "#1a1b26"
   selected_text: "#7aa2f7"

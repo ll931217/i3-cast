@@ -2,6 +2,7 @@
 import os
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -34,6 +35,10 @@ general:
 THEME_EXAMPLE = """\
 # x-cast theme. Every key is optional; delete a line to get its default back.
 # Colors are #rgb, #rrggbb or #aarrggbb. Saved changes apply live.
+
+# Take the colors from an Alacritty theme file (and follow it when it changes).
+# Anything under `colors:` below still wins over the imported value.
+# from_alacritty: ~/.config/alacritty/amp.toml
 
 colors:
   background: "#1a1b26"
@@ -96,6 +101,47 @@ def load(path, previous):
     return camelize(data)
 
 
+HEX = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def alacritty_path(theme):
+    value = theme.get("fromAlacritty")
+    return Path(value).expanduser() if isinstance(value, str) and value else None
+
+
+def alacritty_colors(path):
+    """x-cast colors derived from an Alacritty theme: [D] cursor is the accent, selection the highlight."""
+    try:
+        toml = tomllib.loads(path.read_text(encoding="utf-8")).get("colors", {})
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        print("x-cast: cannot use Alacritty theme %s: %s" % (path, e), file=sys.stderr)
+        return {}
+    def pick(*keys):
+        node = toml
+        for key in keys:
+            node = node.get(key, {}) if isinstance(node, dict) else {}
+        return node if isinstance(node, str) and HEX.match(node) else None
+    derived = {
+        "background": pick("primary", "background"),
+        "text": pick("primary", "foreground"),
+        "selectedText": pick("cursor", "cursor") or pick("normal", "blue"),
+        "selectedBackground": pick("selection", "background"),
+        "border": pick("normal", "black"),
+        "error": pick("normal", "red"),
+    }
+    return {k: v for k, v in derived.items() if v}
+
+
+def resolve_theme(theme):
+    """theme.yaml with `from_alacritty` expanded; explicit `colors` override the imported ones."""
+    path = alacritty_path(theme)
+    if path is None:
+        return theme
+    colors = alacritty_colors(path)
+    colors.update(theme.get("colors") or {})
+    return {**theme, "colors": colors}
+
+
 def write_examples(directory):
     directory.mkdir(parents=True, exist_ok=True)
     for name, text in (("config.yaml", CONFIG_EXAMPLE), ("theme.yaml", THEME_EXAMPLE)):
@@ -113,7 +159,8 @@ class HostConfig(QObject):
         self._dir = config_dir()
         write_examples(self._dir)
         self._config = load(self._dir / "config.yaml", {})
-        self._theme = load(self._dir / "theme.yaml", {})
+        self._raw_theme = load(self._dir / "theme.yaml", {})
+        self._theme = resolve_theme(self._raw_theme)
         self._watcher = QFileSystemWatcher(self)
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -131,10 +178,14 @@ class HostConfig(QObject):
         for name in ("config.yaml", "theme.yaml"):
             if (self._dir / name).exists():
                 self._watcher.addPath(str(self._dir / name))
+        imported = alacritty_path(self._raw_theme)
+        if imported and imported.exists():
+            self._watcher.addPath(str(imported))
 
     def _reload(self):
         config = load(self._dir / "config.yaml", self._config)
-        theme = load(self._dir / "theme.yaml", self._theme)
+        self._raw_theme = load(self._dir / "theme.yaml", self._raw_theme)
+        theme = resolve_theme(self._raw_theme)
         if config != self._config:
             self._config = config
             self.configChanged.emit()
