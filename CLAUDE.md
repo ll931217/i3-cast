@@ -137,3 +137,7 @@ Deviations from the original spec (SPEC §2.0 and the Phase 1 note in §12):
 - The Omarchy theme replaces Raycast's 8 themes; the HUD is Omarchy's OSD.
 
 Testing lesson: the query survives hide/show until pop-to-root. A live test must clear it first (Ctrl+U), or typed text gets appended to the old query. Pressing ↵ on a stale query once opened real browser tabs.
+
+**i3 / X11 host (2026-10-20, branch `i3-x11-host`).** `host/` runs the unchanged `plugin/` under plain Qt via PySide6 (`.venv`, `host/requirements.txt`), because Quickshell needs Qt 6.6+ and the xrdp box has Qt 6.4. `host/qsshim.py` re-creates only the Quickshell types `plugin/` uses (Process, FileView, SplitParser, env, execDetached, GlobalShortcut, WlrLayershell). `host/qml/qs/{Commons,Ui}` stand in for Omarchy's shell modules, with a fixed palette [D]. `host/apps.py` provides the app library from `.desktop` files and an icon index (a Python image provider deadlocks, so icons are file URLs). Control is a unix socket at `$XDG_RUNTIME_DIR/oma-cast.sock` (`toggle`, `show`, `hide`, `isOpen`, `ping`).
+Run: `.venv/bin/python host/main.py`, then `echo toggle | nc -U -q0 $XDG_RUNTIME_DIR/oma-cast.sock`.
+Verified on i3 + xrdp: window draws shaped, apps with icons, typing filters through the ranker, Esc closes. Not done: i3 hotkey and `bin/oma-cast` socket mode, `omarchy-launch-browser` and `wl-copy` calls in `Backend.qml` (dead on i3), Enter-to-launch unverified, Omarchy menu source logs an error off Omarchy.

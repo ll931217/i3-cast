@@ -207,7 +207,7 @@ class FileView(QObject):
 
 class Quickshell(QObject):
     @Slot(str, result="QVariant")
-    def env(self, name): return os.environ.get(name)
+    def env(self, name): return os.environ.get(name, "")
 
     @Slot(list)
     def execDetached(self, command):
