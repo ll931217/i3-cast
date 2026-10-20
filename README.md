@@ -7,6 +7,23 @@ A Raycast-style launcher for X11 window managers (i3). It learns what you use, r
 * **Keyboard-first.** Ctrl+K action panel, Ctrl+1–9 quick picks, search history on ↑, emacs-style navigation.
 * **Light.** Plain Qt (PySide6) with no Electron or Node. The window opens in about 45 ms.
 
+<p align="center"><img src="docs/screenshots/hero.png" alt="x-cast listing applications" width="640"></p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/search.png" alt="Searching for 'term' ranks terminals first"></td>
+    <td width="50%"><img src="docs/screenshots/actions.png" alt="The Ctrl+K action panel for Alacritty"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Ranked search with web fallbacks</b></td>
+    <td align="center"><b>Ctrl+K: actions for any result</b></td>
+  </tr>
+</table>
+
+Six themes from `theme.yaml` (the palettes are in `docs/capture.sh`):
+
+<img src="docs/screenshots/themes.png" alt="x-cast in six color themes">
+
 ## Install
 
 Needs Python 3.10+, `nc` (netcat-openbsd), `xclip`, `xdg-open` and `notify-send`.
@@ -76,6 +93,7 @@ x-cast doctor
 ```sh
 node --test tests/*.test.js   # unit tests for plugin/core
 tests/smoke.sh                # live check against the running host (shows and hides the window, never types)
+docs/capture.sh               # regenerate docs/screenshots with a throwaway host (types into the launcher after checking focus)
 ```
 
 Behaviour comes from a static reverse-engineering pass over Raycast; see `SPEC.md` and `reference/`. No Raycast code is included.

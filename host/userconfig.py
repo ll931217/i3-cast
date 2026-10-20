@@ -58,6 +58,9 @@ gap: 10                           # minimum space between the card and the windo
 
 
 def config_dir():
+    override = os.environ.get("X_CAST_CONFIG_DIR")
+    if override:
+        return Path(override)
     base = os.environ.get("XDG_CONFIG_HOME")
     base = base if base and base.startswith("/") else str(Path.home() / ".config")
     return Path(base) / "x-cast"
