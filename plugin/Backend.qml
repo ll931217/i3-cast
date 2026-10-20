@@ -13,6 +13,7 @@ import "core/RootSearch.js" as RootSearch
 import "core/Providers.js" as Providers
 import "core/AppsProvider.js" as AppsProvider
 import "core/WebSearchProvider.js" as WebSearchProvider
+import "core/ExternalProvider.js" as ExternalProvider
 import "services"
 
 // The clone's backend, in-process (SPEC §2.0). It owns the paths, the host
@@ -130,6 +131,10 @@ Item {
   function registerProviders() {
     Providers.register(backend.providerRegistry, AppsProvider.createAppsProvider(backend.services))
     Providers.register(backend.providerRegistry, WebSearchProvider.createWebSearchProvider(backend.services))
+    // Python plugins from the host (host/plugins.py).
+    JSON.parse(PluginHost.providers()).forEach(function(info) {
+      Providers.register(backend.providerRegistry, ExternalProvider.createExternalProvider(PluginHost, info))
+    })
   }
 
   // A stored row, or one of the virtual "Use … with…" rows.
@@ -166,7 +171,7 @@ Item {
     var candidate = backend.candidateFor(id)
     if (!candidate) throw new Error("Unknown command " + id)
 
-    var outcome = Providers.perform(backend.providerRegistry, candidate, action, { query: query })
+    var outcome = Providers.perform(backend.providerRegistry, candidate, action, { query: query, arguments: (data && data.arguments) || [] })
     if (outcome) {
       if (outcome.visit) backend.recordVisit(id, query)
       delete outcome.visit
@@ -356,6 +361,11 @@ Item {
   property int storeRevision: 0
   Connections { target: settingsStore; function onChanged() { backend.storeRevision++ } }
   Connections { target: frecencyStore; function onChanged() { backend.storeRevision++ } }
+
+  Connections {
+    target: PluginHost
+    function onChanged() { rebuildTimer.restart() }
+  }
 
   // config.yaml is parsed by the host, which re-sends it on every save.
   Connections {

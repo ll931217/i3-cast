@@ -3,6 +3,7 @@
 import json
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from PySide6.QtQml import QJSValue, qmlRegisterSingletonInstance
 from PySide6.QtQuick import QQuickView
 
 import apps
+import plugins
 import qsshim
 import userconfig
 
@@ -81,6 +83,11 @@ def main():
     qmlRegisterSingletonInstance(IpcRegistry, "OmaHost", 1, 0, "IpcRegistry", registry)
     qmlRegisterSingletonInstance(userconfig.HostConfig, "OmaHost", 1, 0, "HostConfig", user)
     qmlRegisterSingletonInstance(apps.HostShell, "OmaHost", 1, 0, "HostShell", shell)
+    extensions = plugins.PluginHost(userconfig.config_dir(), lambda: user.config)
+    extensions.notice.connect(lambda style, text: subprocess.Popen(
+        ["notify-send", "-a", "x-cast", "-u", "critical" if style == "failure" else "normal", text]))
+    extensions.load_all(HERE / "plugins", userconfig.config_dir() / "plugins")
+    qmlRegisterSingletonInstance(plugins.PluginHost, "OmaHost", 1, 0, "PluginHost", extensions)
     host = apps.Host()
     qmlRegisterSingletonInstance(apps.Host, "OmaHost", 1, 0, "Host", host)
 
