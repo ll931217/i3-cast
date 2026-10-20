@@ -20,6 +20,7 @@ Item {
   required property bool checked
   required property bool disabled
   required property bool favorite
+  required property bool answer
 
   property bool selected: false
   property var look: null
@@ -33,7 +34,7 @@ Item {
   function px(v) { return Math.round(Style.space(v) * row.zoom) }
 
   width: ListView.view ? ListView.view.width : 0
-  height: row.isSection ? (row.title ? px(30) : px(6)) : px(42)
+  height: row.isSection ? (row.title ? px(30) : px(6)) : (row.answer ? px(54) : px(42))
 
   Text {
     visible: row.isSection && row.title.length > 0
@@ -161,7 +162,8 @@ Item {
         text: row.title
         color: row.look.foreground
         font.family: row.look.fontFamily
-        font.pixelSize: Math.round(Style.font.title * row.zoom)
+        font.pixelSize: Math.round((row.answer ? Style.font.heading : Style.font.title) * row.zoom)
+        font.bold: row.answer
         elide: Text.ElideRight
         width: Math.min(implicitWidth, parent.width)
       }

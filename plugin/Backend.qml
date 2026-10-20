@@ -103,7 +103,8 @@ Item {
       frecency: frecencyStore.loaded ? frecencyStore.doc.items : ({}),
       nowMs: Date.now(),
       sensitivity: settingsStore.loaded ? backend.effectiveGeneral().rootSearchSensitivity : "medium",
-      fallbacks: function(query) { return Providers.fallbacks(backend.providerRegistry, query) }
+      fallbacks: function(query) { return Providers.fallbacks(backend.providerRegistry, query) },
+      answers: function(query) { return Providers.answers(backend.providerRegistry, query) }
     }
   }
 
@@ -141,8 +142,9 @@ Item {
   }
 
   // A stored row, or one of the virtual "Use … with…" rows.
-  function candidateFor(id) {
+  function candidateFor(id, query) {
     return backend.decorated(id) || Providers.findFallback(backend.providerRegistry, id)
+      || Providers.findAnswer(backend.providerRegistry, id, query || "")
   }
 
   function recordVisit(id, query) {
@@ -171,7 +173,7 @@ Item {
     var id = String(data && data.id || "")
     var action = String(data && data.action || "open")
     var query = String(data && data.query || "").trim()
-    var candidate = backend.candidateFor(id)
+    var candidate = backend.candidateFor(id, query)
     if (!candidate) throw new Error("Unknown command " + id)
 
     var outcome = Providers.perform(backend.providerRegistry, candidate, action, { query: query, arguments: (data && data.arguments) || [] })
@@ -317,7 +319,7 @@ Item {
       // The root view's dropdown (Ctrl+P): [{id, title}].
       getFilters: function() { return RootSearch.typeFilters(backend.candidates, Providers.filters(backend.providerRegistry)) },
       getActions: function(data) {
-        var candidate = backend.candidateFor(String(data && data.id || ""))
+        var candidate = backend.candidateFor(String(data && data.id || ""), String(data && data.query || ""))
         if (!candidate) throw new Error("Unknown command " + (data && data.id))
         return RootSearch.actionsFor(candidate, Providers.actionsFor(backend.providerRegistry, candidate))
       },

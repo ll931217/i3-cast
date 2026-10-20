@@ -1,7 +1,7 @@
 // Provider adapter for plugins that live outside the JS runtime (the Python host).
 // `bridge` is a set of functions that return JSON strings:
 //   candidates(id), fallbacks(id, query), filters(id), actionsFor(id, candidateJson), perform(id, candidateJson, action, ctxJson)
-// `info` is {id, hasFallbacks, hasFilters}.
+// `info` is {id, hasFallbacks, hasFilters, hasAnswers}.
 
 function createExternalProvider(bridge, info) {
   var provider = {
@@ -20,6 +20,7 @@ function createExternalProvider(bridge, info) {
     }
   }
   if (info.hasFallbacks) provider.fallbacks = function(query) { return JSON.parse(bridge.fallbacks(info.id, query)) }
+  if (info.hasAnswers) provider.answers = function(query) { return JSON.parse(bridge.answers(info.id, query)) }
   if (info.hasFilters) provider.filters = function() { return JSON.parse(bridge.filters(info.id)) }
   return provider
 }

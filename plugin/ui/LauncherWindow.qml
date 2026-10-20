@@ -174,6 +174,7 @@ OverlayWindow {
       checked: !!c.checked,
       disabled: !!c.disabled,
       favorite: typeof c.favoriteOrder === "number",
+      answer: !!c.answer,
       argsJson: c.arguments && c.arguments.length ? JSON.stringify(c.arguments) : ""
     }
   }
@@ -233,7 +234,7 @@ OverlayWindow {
 
   function actionsForSelected() {
     if (!window.selectedRow) return []
-    var r = window.backend.callSync("rootSearch.getActions", { id: window.selectedRow.itemId })
+    var r = window.backend.callSync("rootSearch.getActions", { id: window.selectedRow.itemId, query: window.query })
     return r.ok ? r.data : []
   }
 

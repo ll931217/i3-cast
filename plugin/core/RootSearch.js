@@ -50,6 +50,8 @@ function rootSections(candidates, query, ctx, deps) {
     var searchable = decorated.filter(function(c) { return c.rootSearch.when !== "empty" })
     var results = deps.Ranker.rank(searchable, q, opts)
     var sections = []
+    var answers = typeof ctx.answers === "function" ? ctx.answers(q) : []
+    if (answers.length) sections.push({ id: "answers", title: "", rows: answers.map(function(candidate) { return { candidate: candidate, record: null } }) })
     if (results.length > 0) sections.push({ id: "results", title: "Results", rows: results })
     var fallbacks = fallbackRows(q, ctx)
     if (fallbacks.length) sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbacks })
@@ -89,7 +91,7 @@ function actionsFor(candidate, own) {
     return copy
   })
 
-  if (candidate.fallback) return list
+  if (candidate.fallback || candidate.answer) return list
 
   if (candidate.favoriteOrder === null || candidate.favoriteOrder === undefined) {
     list.push({ id: "favorite-add", title: "Add to Favorites", shortcut: "Ctrl Shift F", section: "favorites", icon: "" })

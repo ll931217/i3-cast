@@ -15,6 +15,7 @@ A provider (duck-typed, see docs/plugins.md) has:
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 import threading
 import traceback
@@ -90,6 +91,10 @@ class Api:
     def notify(self, style, title):
         """A desktop notification. style: success | failure."""
         self._host.notice.emit(style, title)
+
+    def copy(self, text):
+        """Put text on the clipboard (needs xclip)."""
+        self._host.copy(text)
 
     def run_in_background(self, work, done=None):
         """Run work() on a thread; done(result_or_exception) is called back on the main thread."""
@@ -191,8 +196,28 @@ class PluginHost(QObject):
     @Slot(result=str)
     def providers(self):
         return json.dumps([{"id": pid, "hasFallbacks": callable(getattr(p, "fallbacks", None)),
-                            "hasFilters": callable(getattr(p, "filters", None))}
+                            "hasFilters": callable(getattr(p, "filters", None)),
+                            "hasAnswers": callable(getattr(p, "answers", None))}
                            for pid, p in self._providers.items()])
+
+    @Slot(str, str, result=str)
+    def answers(self, provider_id, query):
+        rows = self._call(provider_id, "answers", lambda p: p.answers(query), [])
+        out = []
+        for i, raw in enumerate(rows or []):
+            raw = dict(raw)
+            raw.setdefault("id", "answer-%d" % i)
+            out.append(normalize_candidate(provider_id, raw))
+        return json.dumps(out)
+
+    def copy(self, text):
+        try:
+            proc = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            proc.stdin.write(str(text).encode())
+            proc.stdin.close()
+        except OSError as e:
+            self._record("host", "copy", str(e))
 
     @Slot(str, result=str)
     def filters(self, provider_id):

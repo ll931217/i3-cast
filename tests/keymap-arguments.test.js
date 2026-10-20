@@ -108,3 +108,13 @@ test("every settings field is a real general setting whose options match its def
   }
   assert.strictEqual(Schema.generalFields.length, Object.keys(defaults).length)
 })
+
+test("answers come first in a query's sections, without a title, and have only their own actions", () => {
+  const Ranker = require("../plugin/core/Ranker.js")
+  const Frecency = require("../plugin/core/Frecency.js")
+  const answer = { id: "calc:answer", title: "4", answer: true }
+  const sections = RootSearch.rootSections([], "2+2", { nowMs: 0, answers: q => [answer], fallbacks: () => [] }, { Ranker, Frecency })
+  assert.deepStrictEqual(sections.map(s => [s.id, s.title]), [["answers", ""]])
+  assert.strictEqual(sections[0].rows[0].candidate, answer)
+  assert.deepStrictEqual(RootSearch.actionsFor(answer, [{ id: "copy", title: "Copy" }]).map(a => a.id), ["copy"])
+})

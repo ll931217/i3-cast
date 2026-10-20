@@ -41,7 +41,8 @@ class PluginHostTests(unittest.TestCase):
         [row] = json.loads(host.candidates("demo"))
         self.assertEqual(row["id"], "demo:a")
         self.assertEqual(len(row["arguments"]), 3)
-        self.assertEqual(json.loads(host.providers()), [{"id": "demo", "hasFallbacks": True, "hasFilters": False}])
+        [info] = json.loads(host.providers())
+        self.assertEqual((info["id"], info["hasFallbacks"], info["hasFilters"], info["hasAnswers"]), ("demo", True, False, False))
 
     def test_plugin_sees_its_local_id_and_returns_an_outcome(self):
         host, tmp = host_with(GOOD)

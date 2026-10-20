@@ -89,3 +89,15 @@ test("filters() collects provider dropdown entries and skips a throwing provider
   assert.deepStrictEqual(P.filters(reg), [{ id: "@a:x", title: "X", provider: "a" }])
   assert.strictEqual(reg.errors.length, 1)
 })
+
+test("answers() tags rows, and findAnswer resolves them for the same query", () => {
+  const reg = P.createRegistry()
+  P.register(reg, { id: "calc", candidates: () => [], actionsFor: () => [], perform: () => undefined,
+    answers: q => q === "2+2" ? [{ id: "calc:answer", title: "4" }] : [] })
+  const rows = P.answers(reg, "2+2")
+  assert.strictEqual(rows[0].answer, true)
+  assert.strictEqual(rows[0].provider, "calc")
+  assert.deepStrictEqual(P.answers(reg, "firefox"), [])
+  assert.strictEqual(P.findAnswer(reg, "calc:answer", "2+2").title, "4")
+  assert.strictEqual(P.findAnswer(reg, "calc:answer", "firefox"), null)
+})

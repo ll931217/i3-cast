@@ -11,6 +11,8 @@
 //                                   -> outcome {close, push, toast, hud, visit} or undefined
 //                                   when the action is not the provider's (generic actions follow)
 //   fallbacks(query)                optional: rows for the "Use … with…" section
+//   answers(query)                  optional: rows shown above the results for this exact query,
+//                                   like a calculator's answer; they are not stored or ranked
 //   filters()                       optional: [{id, title}] entries for the Ctrl+P dropdown; a
 //                                   candidate belongs to one by carrying `category` = id
 //
@@ -84,6 +86,25 @@ function fallbacks(registry, query) {
   return out
 }
 
+function answers(registry, query) {
+  var out = []
+  for (var i = 0; i < registry.order.length; i++) {
+    var id = registry.order[i]
+    var provider = registry.providers[id]
+    if (typeof provider.answers !== "function") continue
+    var rows = tag(guarded(registry, id, "answers", function() { return provider.answers(query) }, []), id)
+    rows.forEach(function(c) { c.answer = true })
+    out = out.concat(rows)
+  }
+  return out
+}
+
+function findAnswer(registry, id, query) {
+  var rows = answers(registry, query)
+  for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]
+  return null
+}
+
 // Dropdown entries from every provider, as {id: "@<provider>:<id>", title, provider}.
 function filters(registry) {
   var out = []
@@ -124,6 +145,8 @@ if (typeof module !== "undefined") {
     candidates: candidates,
     fallbacks: fallbacks,
     filters: filters,
+    answers: answers,
+    findAnswer: findAnswer,
     findFallback: findFallback,
     actionsFor: actionsFor,
     perform: perform

@@ -55,6 +55,8 @@ An exception in `perform` is caught and shown as a failure toast with a "Copy Er
 
 ## Optional provider methods
 
+`answers(query)` returns candidate dicts shown above the results for that exact query, unstored and unranked. Their `perform` and `actions_for` work as usual. The bundled calculator uses it.
+
 `filters()` returns `[{"id", "title"}]`. They are added to the Ctrl+P dropdown, and picking one shows only your rows whose `category` equals its id.
 
 `fallbacks(query)` returns rows for the "Use "query" with..." section. Each row is a candidate dict whose `perform` gets the query in `ctx["query"]`.
@@ -69,6 +71,7 @@ An exception in `perform` is caught and shown as a failure toast with a "Copy Er
 | `api.watch(path)` | Refresh the rows when this file or folder changes. |
 | `api.changed()` | Refresh the rows now. |
 | `api.notify(style, text)` | Desktop notification. |
+| `api.copy(text)` | Put text on the clipboard (xclip). |
 | `api.run_in_background(work, done)` | Run `work()` on a thread. `done(result)` runs on the UI thread. |
 
 Never block in `candidates`, `actions_for` or `perform`. They run on the UI thread. Use `run_in_background` for anything slow.
