@@ -19,7 +19,12 @@ Usage: x-cast <command> [args]
   run <commandId>        Open a command directly, e.g. app:firefox
   call <method> [json]   Call a backend method, e.g. x-cast call system.info
   host                   Run the host in the foreground (logs on the terminal)
+  search <text>          Open the launcher with a query
+  open <link>            Handle x-cast://run/<id>, x-cast://settings, x-cast://search?q=..., or a .rayconfig file
+  import <file>          Import general settings from a Raycast .rayconfig export
   setup i3               Bind \$mod+d to the launcher in ~/.config/i3/config
+  setup hotkeys          Bind the keys under hotkeys: in config.yaml to commands (i3)
+  setup links            Register x-cast:// and .rayconfig with the desktop
   doctor                 Check that the pieces are in place
 
 Options live in $config_dir/config.yaml and theme.yaml.
@@ -48,8 +53,63 @@ cmd_setup_i3() {
   grep -q 'x-cast toggle' "$cfg" && { echo "x-cast: $cfg already has an x-cast binding"; return; }
   cp "$cfg" "$cfg.bak-before-x-cast"
   sed -i -E 's|^(bindsym \$mod\+d .*)$|# \1|' "$cfg"
-  printf '\nbindsym $mod+d exec --no-startup-id %s toggle\nfor_window [class="^x-cast$"] floating enable, border none\n' "$bin" >> "$cfg"
+  printf '\nbindsym $mod+d exec --no-startup-id %s toggle\nfor_window [class="^x-cast$"] floating enable, border none\nfor_window [class="^x-cast$" title="^x-cast Settings$"] border normal\n' "$bin" >> "$cfg"
   echo "x-cast: bound \$mod+d in $cfg (backup: $cfg.bak-before-x-cast); reload i3 with \$mod+Shift+c"
+}
+
+cmd_setup_hotkeys() {
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/i3/config" out="$config_dir/i3-hotkeys.conf" bin="$HOME/.local/bin/x-cast"
+  [[ -f $cfg ]] || die "$cfg not found"
+  mkdir -p "$HOME/.local/bin" && ln -sfn "$self" "$bin"
+  "$python" "$repo/host/hotkeys.py" "$bin" "$config_dir/config.yaml" >"$out.tmp" || { rm -f "$out.tmp"; exit 1; }
+  mv "$out.tmp" "$out"
+  grep -qF "include $out" "$cfg" || { cp -n "$cfg" "$cfg.bak-before-x-cast"; printf '\ninclude %s\n' "$out" >> "$cfg"; }
+  i3-msg reload >/dev/null && echo "x-cast: $(grep -c '^bindsym' "$out") hotkeys written to $out and i3 reloaded"
+}
+
+cmd_setup_links() {
+  local apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications" bin="$HOME/.local/bin/x-cast"
+  mkdir -p "$apps" "$HOME/.local/bin" && ln -sfn "$self" "$bin"
+  cat >"$apps/x-cast-open.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=x-cast links
+Exec=$bin open %u
+NoDisplay=true
+MimeType=x-scheme-handler/x-cast;application/x-rayconfig;
+DESKTOP
+  xdg-mime default x-cast-open.desktop x-scheme-handler/x-cast application/x-rayconfig
+  echo "x-cast: registered x-cast:// links and .rayconfig files ($apps/x-cast-open.desktop)"
+}
+
+urldecode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$1"; }
+
+cmd_import() {
+  [[ -f ${1:-} ]] || die "usage: x-cast import <file.rayconfig>"
+  local summary patch
+  summary=$("$python" "$repo/host/rayconfig.py" "$1") || exit 1
+  patch=$(printf '%s' "$summary" | "$python" -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["general"]))')
+  ipc call settings.updateGeneralSettings "$patch" | grep -q '"ok":true' || die "the host refused the settings: $patch"
+  printf '%s' "$summary" | "$python" -c '
+import json, sys
+d = json.load(sys.stdin)
+print("x-cast: imported %d general settings: %s" % (len(d["general"]), ", ".join(sorted(d["general"])) or "none"))
+if d["skipped"]:
+    print("x-cast: not imported (no home in x-cast yet): " + ", ".join("%s (%d)" % kv for kv in sorted(d["skipped"].items())))'
+}
+
+cmd_open() {
+  local link=${1:-}
+  case $link in
+    x-cast://run/*) ipc run "$(urldecode "${link#x-cast://run/}")" ;;
+    x-cast://settings*) ipc settings >/dev/null ;;
+    x-cast://search*) ipc search "$(urldecode "${link#*q=}")" >/dev/null ;;
+    x-cast://*) die "unknown link $link" ;;
+    file://*.rayconfig) cmd_import "$(urldecode "${link#file://}")" ;;
+    *.rayconfig) cmd_import "$link" ;;
+    raycast://*) die "raycast:// extension links need Raycast's extension runtime, which x-cast does not have" ;;
+    *) die "usage: x-cast open <x-cast:// link or .rayconfig file>" ;;
+  esac
 }
 
 cmd_doctor() {
@@ -78,7 +138,16 @@ case "${1:-}" in
   call) [[ -n ${2:-} ]] || die "usage: x-cast call <method> [json]"; ipc call "$2" "${3:-}" ;;
   ping) ipc ping ;;
   host) exec "$python" "$repo/host/main.py" ;;
-  setup) [[ ${2:-} == i3 ]] || die "usage: x-cast setup i3"; cmd_setup_i3 ;;
+  search) ipc search "${2:-}" >/dev/null ;;
+  open) cmd_open "${2:-}" ;;
+  import) cmd_import "${2:-}" ;;
+  setup)
+    case ${2:-} in
+      i3) cmd_setup_i3 ;;
+      hotkeys) cmd_setup_hotkeys ;;
+      links) cmd_setup_links ;;
+      *) die "usage: x-cast setup i3|hotkeys|links" ;;
+    esac ;;
   doctor) cmd_doctor ;;
   ""|-h|--help|help) usage ;;
   *) usage >&2; exit 2 ;;

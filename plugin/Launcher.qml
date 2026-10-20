@@ -112,6 +112,11 @@ Item {
       return "settings"
     }
 
+    function search(text: string): string {
+      root.open(JSON.stringify({ query: text }))
+      return "shown"
+    }
+
     function isOpen(): string {
       return root.opened ? "true" : "false"
     }

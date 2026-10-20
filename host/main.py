@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, Slot
+from PySide6.QtCore import QObject, QTimer, QUrl, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtQml import QJSValue, qmlRegisterSingletonInstance
@@ -71,8 +71,13 @@ def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("x-cast")
     app.setDesktopFileName("x-cast")
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    # Quit through Qt so the backend's onDestruction flushes settings.json and frecency.json.
+    # A timer lets the Python-level handler run while Qt owns the main thread.
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    tick = QTimer()
+    tick.start(250)
+    tick.timeout.connect(lambda: None)
 
     apps.init_icon_theme()
     apps.icons.warm()

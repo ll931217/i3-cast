@@ -106,4 +106,7 @@ Behaviour comes from a static reverse-engineering pass over Raycast; see `SPEC.m
 - `x-cast settings` opens the settings window (also the "x-cast Settings" command). A value set in `config.yaml` wins and locks its row.
 - Tab moves into argument pills. Ctrl+P opens the type filter. Ctrl+T opens the toast's actions.
 - `navigation_bindings: vim-motions` gives Ctrl+J/K/H/L. The action panel then moves to Ctrl+Shift+K.
+- Hotkeys: list `hotkeys: {"<commandId>": "$mod+Shift+f"}` in `config.yaml`, then run `x-cast setup hotkeys`. It writes `~/.config/x-cast/i3-hotkeys.conf`, includes it from your i3 config and reloads i3.
+- Links: `x-cast setup links` registers `x-cast://run/<id>`, `x-cast://settings`, `x-cast://search?q=...` and `.rayconfig` files (`x-cast open <link>`). `raycast://` links are not supported, because x-cast has no extension runtime.
+- `x-cast import file.rayconfig` imports the general settings from a Raycast export. Encrypted exports are refused; export again without a password. Quicklinks, snippets, notes and the rest are reported as not imported.
 - With `from_alacritty`, the card outline uses the Alacritty cursor color.

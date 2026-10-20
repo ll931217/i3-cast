@@ -35,6 +35,7 @@ def register(api):
 | `glyph` | A Nerd Font glyph, used when there is no icon. |
 | `arguments` | Up to three pills: `{"placeholder", "type": "text" or "password" or "dropdown", "optional", "data": [options]}`. |
 | `data` | Anything JSON. It comes back to you in `actions_for` and `perform`. |
+| `category` | Which of your `filters()` entries this row belongs to. |
 | `root` | `"always"` (default), `"searching"` (only when a query is typed) or `"empty"`. |
 
 x-cast prefixes ids with your provider id so plugins cannot collide. Your code always sees its own short id.
@@ -53,6 +54,8 @@ x-cast prefixes ids with your provider id so plugins cannot collide. Your code a
 An exception in `perform` is caught and shown as a failure toast with a "Copy Error" action. A plugin that fails to load is skipped, and the traceback goes to the host's stderr.
 
 ## Optional provider methods
+
+`filters()` returns `[{"id", "title"}]`. They are added to the Ctrl+P dropdown, and picking one shows only your rows whose `category` equals its id.
 
 `fallbacks(query)` returns rows for the "Use "query" with..." section. Each row is a candidate dict whose `perform` gets the query in `ctx["query"]`.
 
@@ -83,4 +86,4 @@ The bundled `script_commands.py` reads Raycast-format scripts from `~/.config/x-
 echo "hello $1"
 ```
 
-Press Tab to move into the argument pills, type a value, then Enter. All modes (`compact`, `silent`, `fullOutput`) run in the background and show the last output line as a notification. Inline refresh and `needsConfirmation` are not supported.
+Press Tab to move into the argument pills, type a value, then Enter. All modes (`compact`, `silent`, `fullOutput`) run in the background and show the last output line as a notification. `inline` scripts need `# @raycast.refreshTime 10s` (or `5m`, `1h`, `1d`; at least 10 s) and no arguments. Their last output line becomes the row's subtitle and refreshes in the background. `# @raycast.needsConfirmation true` asks for a second Enter within 5 seconds. Each script's `packageName` is a Ctrl+P filter.
