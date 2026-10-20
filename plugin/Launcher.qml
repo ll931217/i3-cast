@@ -22,17 +22,14 @@ Item {
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
-    var wasOpen = root.opened
     root.opened = true
     root.openedAt = Date.now()
     launcher.prepare(payload)
-    if (!wasOpen) backend.emit("window.visibilityChanged", { visible: true })
   }
 
   function close() {
     if (!root.opened) return
     root.opened = false
-    backend.emit("window.visibilityChanged", { visible: false })
   }
 
   // ---------------------------------------------------------- our controls
