@@ -3,6 +3,8 @@ const assert = require("node:assert/strict")
 const Ranker = require("../plugin/core/Ranker.js")
 const Frecency = require("../plugin/core/Frecency.js")
 const RS = require("../plugin/core/RootSearch.js")
+const Apps = require("../plugin/core/AppsProvider.js")
+const Web = require("../plugin/core/WebSearchProvider.js")
 
 const deps = { Ranker, Frecency }
 const NOW = Date.UTC(2026, 9, 19, 12)
@@ -16,11 +18,14 @@ const apps = ["firefox", "chromium", "signal-desktop", "org.gnome.Nautilus", "Al
 }))
 
 function candidates() {
-  return apps.map(RS.appCandidate)
+  return apps.map(Apps.appCandidate)
 }
 
+const webSearch = (engines) => Web.createWebSearchProvider({ engines: () => engines || Web.DEFAULT_ENGINES, openUrl() {} })
+const fallbacksFor = (engines) => (query) => webSearch(engines).fallbacks(query).map((c) => Object.assign(c, { provider: "web-search", fallback: true }))
+
 function ctx(extra) {
-  return Object.assign({ commands: {}, frecency: {}, nowMs: NOW, sensitivity: "medium" }, extra || {})
+  return Object.assign({ commands: {}, frecency: {}, nowMs: NOW, sensitivity: "medium", fallbacks: fallbacksFor() }, extra || {})
 }
 
 const titles = (section) => section.rows.map((r) => r.candidate.title)
@@ -73,14 +78,14 @@ test("disabled commands are left out", () => {
 })
 
 test("configured fallbacks replace the built-in ones", () => {
-  const fallbacks = [{ id: "fallback:0", title: "Search Kagi", icon: "", url: "https://kagi.com/search?q={query}" }]
-  const sections = results("zzzz-nothing", ctx({ fallbacks }))
+  const sections = results("zzzz-nothing", ctx({ fallbacks: fallbacksFor([{ title: "Search Kagi", url: "https://kagi.com/search?q={query}" }]) }))
   assert.deepEqual(titles(sections[0]), ["Search Kagi"])
 })
 
 test("actions: primary first, favourites and alias offered", () => {
-  const app = RS.decorate(RS.appCandidate(apps[0]), ctx(), deps)
-  const ids = RS.actionsFor(app).map((a) => a.id)
+  const app = RS.decorate(Apps.appCandidate(apps[0]), ctx(), deps)
+  const own = Apps.createAppsProvider({ entries: () => [], launch() {}, copyText() {} }).actionsFor(app)
+  const ids = RS.actionsFor(app, own).map((a) => a.id)
   assert.equal(ids[0], "open")
   assert.ok(ids.includes("favorite-add") && ids.includes("set-alias") && ids.includes("copy-id"))
 })
@@ -92,6 +97,10 @@ test("favourite reordering", () => {
   assert.deepEqual(RS.reorderFavorites(cmds, "a", "favorite-remove"), { a: null, b: 0 })
 })
 
+test("a query with no provider fallbacks has no fallback section", () => {
+  assert.equal(results("zzzz-nothing", ctx({ fallbacks: () => [] })).length, 0)
+})
+
 test("fallback URLs encode the query", () => {
-  assert.equal(RS.fallbackUrl(RS.FALLBACKS[0], " a&b c "), "https://www.google.com/search?q=a%26b%20c")
+  assert.equal(Web.searchUrl(Web.DEFAULT_ENGINES[0], " a&b c "), "https://www.google.com/search?q=a%26b%20c")
 })

@@ -10,6 +10,9 @@ import "core/Schema.js" as Schema
 import "core/Ranker.js" as Ranker
 import "core/Frecency.js" as Frecency
 import "core/RootSearch.js" as RootSearch
+import "core/Providers.js" as Providers
+import "core/AppsProvider.js" as AppsProvider
+import "core/WebSearchProvider.js" as WebSearchProvider
 import "services"
 
 // The clone's backend, in-process (SPEC §2.0). It owns the paths, the host
@@ -30,6 +33,8 @@ Item {
   readonly property bool ready: directoriesReady && settingsStore.loaded && frecencyStore.loaded
 
   readonly property var registry: Rpc.createRegistry()
+  // Root-search sources. Apps and web search are providers like any extension's.
+  readonly property var providerRegistry: Providers.createRegistry()
   readonly property double startedAt: Date.now()
   readonly property var deps: ({ Ranker: Ranker, Frecency: Frecency })
 
@@ -70,9 +75,7 @@ Item {
   }
 
   function rebuildCandidates() {
-    var next = []
-    var apps = backend.appEntries()
-    for (var i = 0; i < apps.length; i++) if (apps[i] && apps[i].id) next.push(RootSearch.appCandidate(apps[i]))
+    var next = Providers.candidates(backend.providerRegistry)
     var byId = ({})
     for (var j = 0; j < next.length; j++) byId[next[j].id] = next[j]
     backend.candidates = next
@@ -97,7 +100,7 @@ Item {
       frecency: frecencyStore.loaded ? frecencyStore.doc.items : ({}),
       nowMs: Date.now(),
       sensitivity: settingsStore.loaded ? backend.effectiveGeneral().rootSearchSensitivity : "medium",
-      fallbacks: backend.fallbacks()
+      fallbacks: function(query) { return Providers.fallbacks(backend.providerRegistry, query) }
     }
   }
 
@@ -114,8 +117,25 @@ Item {
     Util.execArgv(["sh", "-c", 'printf %s "$1" | xclip -selection clipboard', "x-cast", text])
   }
 
-  // Search engines for "Use … with…": config.yaml `fallbacks`, else the built-in list.
-  function fallbacks() { return backend.config.fallbacks || RootSearch.FALLBACKS }
+  // What the built-in providers need from the host.
+  readonly property var services: ({
+    entries: function() { return backend.appEntries() },
+    launch: function(appId, title) { backend.appLibrary.launch(appId, title) },
+    openUrl: function(url) { backend.openUrl(url) },
+    copyText: function(text) { backend.copyText(text) },
+    // config.yaml `fallbacks`, else the built-in list.
+    engines: function() { return backend.config.fallbacks || WebSearchProvider.DEFAULT_ENGINES }
+  })
+
+  function registerProviders() {
+    Providers.register(backend.providerRegistry, AppsProvider.createAppsProvider(backend.services))
+    Providers.register(backend.providerRegistry, WebSearchProvider.createWebSearchProvider(backend.services))
+  }
+
+  // A stored row, or one of the virtual "Use … with…" rows.
+  function candidateFor(id) {
+    return backend.decorated(id) || Providers.findFallback(backend.providerRegistry, id)
+  }
 
   function recordVisit(id, query) {
     if (!frecencyStore.loaded) return
@@ -143,26 +163,18 @@ Item {
     var id = String(data && data.id || "")
     var action = String(data && data.action || "open")
     var query = String(data && data.query || "").trim()
-    var candidate = backend.decorated(id)
+    var candidate = backend.candidateFor(id)
     if (!candidate) throw new Error("Unknown command " + id)
 
-    if (action === "open") {
-      switch (candidate.kind) {
-        case "app":
-          backend.recordVisit(id, query)
-          backend.appLibrary.launch(candidate.appId, candidate.title)
-          return { close: true }
-        case "fallback":
-          backend.openUrl(RootSearch.fallbackUrl(candidate, query))
-          return { close: true }
-      }
-      throw new Error("Cannot open " + id)
+    var outcome = Providers.perform(backend.providerRegistry, candidate, action, { query: query })
+    if (outcome) {
+      if (outcome.visit) backend.recordVisit(id, query)
+      delete outcome.visit
+      return outcome
     }
+    if (action === "open") throw new Error("Cannot open " + id)
 
     switch (action) {
-      case "copy-id":
-        backend.copyText(candidate.appId + ".desktop")
-        return { close: true, hud: "Copied to Clipboard" }
       case "favorite-add":
       case "favorite-remove":
       case "favorite-up":
@@ -278,23 +290,11 @@ Item {
         })
       },
       getActions: function(data) {
-        var candidate = backend.decorated(String(data && data.id || ""))
-        if (!candidate) {
-          var fallback = backend.fallbacks().filter(function(f) { return f.id === data.id })[0]
-          if (!fallback) throw new Error("Unknown command " + (data && data.id))
-          return RootSearch.actionsFor({ kind: "fallback", title: fallback.title })
-        }
-        return RootSearch.actionsFor(candidate)
+        var candidate = backend.candidateFor(String(data && data.id || ""))
+        if (!candidate) throw new Error("Unknown command " + (data && data.id))
+        return RootSearch.actionsFor(candidate, Providers.actionsFor(backend.providerRegistry, candidate))
       },
-      performAction: function(data) {
-        // Fallbacks are rows, not stored candidates.
-        var fallback = backend.fallbacks().filter(function(f) { return f.id === (data && data.id) })[0]
-        if (fallback) {
-          backend.openUrl(RootSearch.fallbackUrl(fallback, data.query))
-          return { close: true }
-        }
-        return backend.performAction(data)
-      },
+      performAction: function(data) { return backend.performAction(data) },
       getSearchHistory: function() { return frecencyStore.loaded ? frecencyStore.doc.searchHistory : [] }
     })
 
@@ -309,6 +309,7 @@ Item {
 
   Component.onCompleted: {
     backend.config = Schema.withConfigDefaults(HostConfig.config)
+    registerProviders()
     registerServices()
     mkdirs.running = true
   }

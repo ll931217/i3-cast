@@ -1,37 +1,9 @@
-// Root search assembly (SPEC §7): candidates from each provider, metadata
+// Root search assembly (SPEC §7): candidates from the providers (Providers.js), metadata
 // (alias, favourites, frecency), sections, and the actions each row offers.
 // Ranking itself is Ranker.js; frecency maths is Frecency.js. Both are passed
 // in as `deps` because a core module never imports another (QML + node).
 
 var SUGGESTIONS_LIMIT = 6            // [I] SPEC §7.2 "N≈6"
-
-// Default fallback commands, in order [O names, D URLs]. config.yaml may replace them.
-var FALLBACKS = [
-  { id: "fallback:google", title: "Search Google", icon: "", url: "https://www.google.com/search?q={query}" },
-  { id: "fallback:duckduckgo", title: "Search DuckDuckGo", icon: "", url: "https://duckduckgo.com/?q={query}" }
-]
-
-function appCandidate(entry) {
-  var desktopId = String(entry.id || "")
-  var keywords = []
-  if (entry.genericName) keywords.push(String(entry.genericName))
-  try {
-    if (entry.keywords && entry.keywords.length) for (var i = 0; i < entry.keywords.length; i++) if (entry.keywords[i]) keywords.push(String(entry.keywords[i]))
-  } catch (e) {}
-  return {
-    id: "app:" + desktopId,
-    type: "application",
-    kind: "app",
-    title: String(entry.name || desktopId),
-    subtitle: "",
-    keywords: keywords,
-    bundleId: desktopId,               // matched only for queries with "." [O]
-    typeLabel: "Application",
-    appId: desktopId,
-    iconName: String(entry.icon || ""),
-    rootSearch: { when: "always" }
-  }
-}
 
 // Attach per-user metadata. Returns new objects; inputs stay untouched.
 function decorate(candidate, ctx, deps) {
@@ -56,16 +28,10 @@ function rankOptions(ctx) {
   return { sensitivity: ctx.sensitivity || "medium", nowMs: ctx.nowMs }
 }
 
-function fallbackRows(query, fallbacks) {
-  return (fallbacks || FALLBACKS).map(function(f) {
-    return {
-      candidate: {
-        id: f.id, type: "command", kind: "fallback", title: f.title, subtitle: query,
-        typeLabel: "Fallback", glyph: f.icon, url: f.url, rootSearch: { when: "searching" }
-      },
-      record: null
-    }
-  })
+// "Use … with…" rows: whatever the providers offer as fallbacks for this query.
+function fallbackRows(query, ctx) {
+  var rows = typeof ctx.fallbacks === "function" ? ctx.fallbacks(query) : []
+  return rows.map(function(candidate) { return { candidate: candidate, record: null } })
 }
 
 // Sections for the root view (SPEC §7.2):
@@ -85,7 +51,8 @@ function rootSections(candidates, query, ctx, deps) {
     var results = deps.Ranker.rank(searchable, q, opts)
     var sections = []
     if (results.length > 0) sections.push({ id: "results", title: "Results", rows: results })
-    sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbackRows(q, ctx.fallbacks) })
+    var fallbacks = fallbackRows(q, ctx)
+    if (fallbacks.length) sections.push({ id: "fallback-commands", title: "Use “" + q + "” with…", rows: fallbacks })
     return sections
   }
 
@@ -111,23 +78,18 @@ function rootSections(candidates, query, ctx, deps) {
   return out
 }
 
-// Actions for a row (SPEC §10.2 action panel, §10.3 shortcuts). The first is
-// primary (↵), the second secondary (Ctrl ↵).
-function actionsFor(candidate) {
-  var primary
-  var list = []
-  switch (candidate.kind) {
-    case "app": primary = { id: "open", title: "Open Application", icon: "" }; break
-    case "fallback": primary = { id: "open", title: candidate.title, icon: "" }; break
-    default: primary = { id: "open", title: "Open Command", icon: "" }
-  }
-  primary.shortcut = "↵"
-  primary.section = "primary"
-  list.push(primary)
+// Actions for a row (SPEC §10.2 action panel, §10.3 shortcuts). `own` is what the
+// row's provider offers; its first entry is primary (↵), the second secondary
+// (Ctrl ↵). The generic actions below apply to every stored row.
+function actionsFor(candidate, own) {
+  var list = (own && own.length ? own : [{ id: "open", title: "Open Command" }]).map(function(action, i) {
+    var copy = {}
+    for (var k in action) copy[k] = action[k]
+    if (i === 0) { copy.shortcut = "↵"; copy.section = "primary" }
+    return copy
+  })
 
-  if (candidate.kind === "fallback") return list
-
-  if (candidate.kind === "app") list.push({ id: "copy-id", title: "Copy Desktop ID", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
+  if (candidate.fallback) return list
 
   if (candidate.favoriteOrder === null || candidate.favoriteOrder === undefined) {
     list.push({ id: "favorite-add", title: "Add to Favorites", shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
@@ -160,19 +122,12 @@ function reorderFavorites(commands, id, action) {
   return out
 }
 
-function fallbackUrl(candidate, query) {
-  return String(candidate.url || "").replace("{query}", encodeURIComponent(String(query || "").trim()))
-}
-
 if (typeof module !== "undefined") {
   module.exports = {
     SUGGESTIONS_LIMIT: SUGGESTIONS_LIMIT,
-    FALLBACKS: FALLBACKS,
-    appCandidate: appCandidate,
     decorate: decorate,
     rootSections: rootSections,
     actionsFor: actionsFor,
-    reorderFavorites: reorderFavorites,
-    fallbackUrl: fallbackUrl
+    reorderFavorites: reorderFavorites
   }
 }
