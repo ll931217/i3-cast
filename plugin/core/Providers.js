@@ -43,66 +43,82 @@ function get(registry, id) {
   return registry.providers[id] || null
 }
 
-// A provider that throws must not take the launcher down: record and skip.
-function guarded(registry, id, what, fn, fallback) {
-  try { return fn() } catch (e) {
-    registry.errors.push({ provider: id, during: what, error: String(e) })
-    if (registry.errors.length > 50) registry.errors.shift()
-    return fallback
-  }
+// Diagnostics deliberately contain no provider exception text or row payloads.
+function diagnostic(registry, id, what, message, row) {
+  var error = { provider: id, during: what, error: message }
+  if (row !== undefined) error.row = row
+  registry.errors.push(error)
+  if (registry.errors.length > 50) registry.errors.shift()
 }
 
-function tag(list, id) {
+function jsonCopy(value) {
+  return JSON.parse(JSON.stringify(value, function(key, item) {
+    if (typeof item === "number" && !isFinite(item)) throw new Error("Non-finite JSON number")
+    return item
+  }))
+}
+
+function object(value) { return value !== null && typeof value === "object" && !Array.isArray(value) }
+
+// Invoke once, then isolate each row: one broken row must not hide its siblings.
+function guardedList(registry, id, what, fn, normalize) {
+  var list
+  try { list = fn() } catch (e) {
+    diagnostic(registry, id, what, "Provider invocation failed")
+    return []
+  }
+  if (!Array.isArray(list)) {
+    diagnostic(registry, id, what, "Expected list")
+    return []
+  }
   var out = []
-  for (var i = 0; i < (list || []).length; i++) {
-    var c = list[i]
-    if (!c || !c.id) continue
-    c.provider = id
-    out.push(c)
+  for (var i = 0; i < list.length; i++) {
+    try {
+      var row = jsonCopy(list[i])
+      if (!object(row) || !row.id) throw new Error("Invalid row")
+      out.push(normalize(row))
+    } catch (e) {
+      diagnostic(registry, id, what, "Invalid row", i)
+    }
+  }
+  return out
+}
+
+function candidateRow(row, id, kind) {
+  row.provider = id
+  if (kind === "fallbacks") row.fallback = true
+  if (kind === "answers") row.answer = true
+  var root = object(row.rootSearch) ? row.rootSearch : {}
+  if (["always", "empty", "searching"].indexOf(root.when) < 0) {
+    root.when = kind === "candidates" ? "always" : "searching"
+  }
+  row.rootSearch = root
+  return row
+}
+
+function candidateLists(registry, what, query) {
+  var out = []
+  for (var i = 0; i < registry.order.length; i++) {
+    var id = registry.order[i]
+    var provider = registry.providers[id]
+    if (what !== "candidates" && typeof provider[what] !== "function") continue
+    out = out.concat(guardedList(registry, id, what,
+      function() { return what === "candidates" ? provider.candidates() : provider[what](query) },
+      function(row) { return candidateRow(row, id, what) }))
   }
   return out
 }
 
 function candidates(registry) {
-  var out = []
-  for (var i = 0; i < registry.order.length; i++) {
-    var id = registry.order[i]
-    var provider = registry.providers[id]
-    out = out.concat(tag(guarded(registry, id, "candidates", function() { return provider.candidates() }, []), id))
-  }
-  return out
+  return candidateLists(registry, "candidates")
 }
 
 function fallbacks(registry, query) {
-  var out = []
-  for (var i = 0; i < registry.order.length; i++) {
-    var id = registry.order[i]
-    var provider = registry.providers[id]
-    if (typeof provider.fallbacks !== "function") continue
-    var rows = tag(guarded(registry, id, "fallbacks", function() { return provider.fallbacks(query) }, []), id)
-    rows.forEach(function(c) { c.fallback = true })
-    out = out.concat(rows)
-  }
-  return out
+  return candidateLists(registry, "fallbacks", query)
 }
 
 function answers(registry, query) {
-  var out = []
-  for (var i = 0; i < registry.order.length; i++) {
-    var id = registry.order[i]
-    var provider = registry.providers[id]
-    if (typeof provider.answers !== "function") continue
-    var rows = tag(guarded(registry, id, "answers", function() { return provider.answers(query) }, []), id)
-    rows.forEach(function(c) { c.answer = true })
-    out = out.concat(rows)
-  }
-  return out
-}
-
-function findAnswer(registry, id, query) {
-  var rows = answers(registry, query)
-  for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]
-  return null
+  return candidateLists(registry, "answers", query)
 }
 
 // Dropdown entries from every provider, as {id: "@<provider>:<id>", title, provider}.
@@ -112,22 +128,23 @@ function filters(registry) {
     var id = registry.order[i]
     var provider = registry.providers[id]
     if (typeof provider.filters !== "function") continue
-    var items = guarded(registry, id, "filters", function() { return provider.filters() }, [])
-    items.forEach(function(f) { if (f && f.id) out.push({ id: "@" + id + ":" + f.id, title: String(f.title || f.id), provider: id }) })
+    out = out.concat(guardedList(registry, id, "filters", function() { return provider.filters() }, function(row) {
+      return { id: "@" + id + ":" + row.id, title: String(row.title || row.id), provider: id }
+    }))
   }
   return out
 }
 
-function findFallback(registry, id) {
-  var rows = fallbacks(registry, "")
-  for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]
-  return null
-}
-
 function actionsFor(registry, candidate) {
+  if (!object(candidate)) return []
   var provider = registry.providers[candidate.provider]
   if (!provider) return []
-  return guarded(registry, provider.id, "actionsFor", function() { return provider.actionsFor(candidate) }, [])
+  return guardedList(registry, provider.id, "actionsFor", function() { return provider.actionsFor(jsonCopy(candidate)) }, function(row) {
+    if (typeof row.id !== "string" || !row.id.trim() || typeof row.title !== "string" || !row.title.trim()) {
+      throw new Error("Invalid action")
+    }
+    return row
+  })
 }
 
 function perform(registry, candidate, actionId, ctx) {
@@ -146,8 +163,6 @@ if (typeof module !== "undefined") {
     fallbacks: fallbacks,
     filters: filters,
     answers: answers,
-    findAnswer: findAnswer,
-    findFallback: findFallback,
     actionsFor: actionsFor,
     perform: perform
   }

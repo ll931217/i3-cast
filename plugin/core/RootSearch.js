@@ -92,7 +92,8 @@ function rootSections(candidates, query, ctx, deps) {
 // row's provider offers; its first entry is primary (↵), the second secondary
 // (Ctrl ↵). The generic actions below apply to every stored row.
 function actionsFor(candidate, own) {
-  var list = (own && own.length ? own : [{ id: "open", title: "Open Command" }]).map(function(action, i) {
+  if (!own || !own.length) return []
+  var list = own.map(function(action, i) {
     var copy = {}
     for (var k in action) copy[k] = action[k]
     if (i === 0) { copy.shortcut = "↵"; copy.section = "primary" }

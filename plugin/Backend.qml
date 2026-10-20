@@ -16,6 +16,8 @@ import "core/WebSearchProvider.js" as WebSearchProvider
 import "core/ExternalProvider.js" as ExternalProvider
 import "core/SettingsProvider.js" as SettingsProvider
 import "core/Links.js" as Links
+import "core/Results.js" as Results
+import "core/Execution.js" as Execution
 import "services"
 
 // The clone's backend, in-process (SPEC §2.0). It owns the paths, the host
@@ -23,6 +25,7 @@ import "services"
 // registry; the launcher UI and the IPC handler both go through call().
 Item {
   id: backend
+  objectName: "backend"
 
   readonly property string version: "0.1.0"
   readonly property var paths: Paths.resolve(function(name) { return Quickshell.env(name) })
@@ -141,10 +144,34 @@ Item {
     })
   }
 
-  // A stored row, or one of the virtual "Use … with…" rows.
-  function candidateFor(id, query) {
-    return backend.decorated(id) || Providers.findFallback(backend.providerRegistry, id)
-      || Providers.findAnswer(backend.providerRegistry, id, query || "")
+  // Display sessions own snapshots; ordinary searches never allocate or expire them.
+  readonly property var results: Results.create(function(id) { return Providers.get(backend.providerRegistry, id) })
+  readonly property var execution: Execution.create({
+    resolve: function(target) {
+      var resolved = target.ref ? backend.results.resolve(target.ref) : { candidate: backend.decorated(target.id), query: "" }
+      var c = resolved.candidate
+      if (!c || !Providers.get(backend.providerRegistry, c.provider)) throw new Error("Unknown command or provider")
+      var settings = settingsStore.doc.commands[c.id]
+      if (settings && settings.enabled === false) throw new Error("Command is disabled")
+      return resolved
+    },
+    identity: function(c) { return Providers.get(backend.providerRegistry, c.provider) },
+    actions: function(c) { return Providers.actionsFor(backend.providerRegistry, c) },
+    perform: function(c, action, ctx) { return Providers.perform(backend.providerRegistry, c, action, ctx) },
+    generic: function(c, action) { return backend.performGeneric(c, action) },
+    isGeneric: function(action) { return ["favorite-add", "favorite-remove", "favorite-up", "favorite-down", "set-alias", "remove-alias", "reset-ranking", "disable"].indexOf(action) >= 0 },
+    visit: function(id, query) { backend.recordVisit(id, query) }
+  })
+
+  function targetFor(data) { return data && data.ref ? { ref: data.ref } : { id: String(data && data.id || "") } }
+
+  function searchSections(data) {
+    var query = String(data && data.query || "")
+    var pool = RootSearch.filterByType(backend.candidates, String(data && data.filter || ""))
+    var sections = RootSearch.rootSections(pool, query, backend.searchContext(), backend.deps)
+    return sections.map(function(s) {
+      return { id: s.id, title: s.title, rows: s.rows.map(function(r) { return r.candidate }) }
+    })
   }
 
   function recordVisit(id, query) {
@@ -170,20 +197,16 @@ Item {
   // One action on one row. Returns what the UI should do next:
   // { close, push: {view}, toast: {style, title}, hud: "text" }.
   function performAction(data) {
-    var id = String(data && data.id || "")
-    var action = String(data && data.action || "open")
-    var query = String(data && data.query || "").trim()
-    var candidate = backend.candidateFor(id, query)
-    if (!candidate) throw new Error("Unknown command " + id)
+    // QML var properties can expose QVariantList wrappers rather than JS arrays.
+    var args = JSON.parse(JSON.stringify((data && data.arguments) || []))
+    var request = { target: backend.targetFor(data), arguments: args }
+    if (data && data.action !== undefined) request.action = data.action
+    if (data && data.continuation) request.continuation = data.continuation
+    return backend.execution.execute(request)
+  }
 
-    var outcome = Providers.perform(backend.providerRegistry, candidate, action, { query: query, arguments: (data && data.arguments) || [] })
-    if (outcome) {
-      if (outcome.visit) backend.recordVisit(id, query)
-      delete outcome.visit
-      return outcome
-    }
-    if (action === "open") throw new Error("Cannot open " + id)
-
+  function performGeneric(candidate, action) {
+    var id = candidate.id
     switch (action) {
       case "favorite-add":
       case "favorite-remove":
@@ -309,19 +332,19 @@ Item {
     Rpc.register(backend.registry, "rootSearch", {
       // {query} -> sections of plain rows.
       search: function(data) {
-        var query = String(data && data.query || "")
-        var pool = RootSearch.filterByType(backend.candidates, String(data && data.filter || ""))
-        var sections = RootSearch.rootSections(pool, query, backend.searchContext(), backend.deps)
-        return sections.map(function(s) {
-          return { id: s.id, title: s.title, rows: s.rows.map(function(r) { return r.candidate }) }
-        })
+        var sections = backend.searchSections(data)
+        return data && data.session ? backend.results.replace(data.session, sections, data.query) : sections
       },
+      openSession: function() { return backend.results.open() },
+      closeSession: function(data) { backend.results.close(String(data && data.session || "")); return null },
+      cancelPrompt: function(data) { backend.execution.cancel(data && data.continuation); return null },
       // The root view's dropdown (Ctrl+P): [{id, title}].
       getFilters: function() { return RootSearch.typeFilters(backend.candidates, Providers.filters(backend.providerRegistry)) },
       getActions: function(data) {
-        var candidate = backend.candidateFor(String(data && data.id || ""), String(data && data.query || ""))
+        var target = backend.targetFor(data)
+        var candidate = target.ref ? backend.results.resolve(target.ref).candidate : backend.decorated(target.id)
         if (!candidate) throw new Error("Unknown command " + (data && data.id))
-        return RootSearch.actionsFor(candidate, Providers.actionsFor(backend.providerRegistry, candidate))
+        return RootSearch.actionsFor(candidate, backend.execution.actions(target))
       },
       performAction: function(data) { return backend.performAction(data) },
       // A raycast:// link: run the local command with the same slug, else ask for a search. [D]
@@ -332,11 +355,7 @@ Item {
         var pool = backend.candidates.filter(function(c) { return !(commands[c.id] && commands[c.id].enabled === false) })
         var hit = Links.resolve(pool, link)
         if (!hit) return { search: link.command.replace(/-/g, " ") }
-        if (hit.missingArguments) return { search: hit.candidate.title }
-        var actions = Providers.actionsFor(backend.providerRegistry, hit.candidate)
-        if (!actions.length) return { search: hit.candidate.title }
-        var outcome = backend.performAction({ id: hit.candidate.id, action: actions[0].id, query: "", arguments: hit.arguments })
-        return outcome && outcome.close ? { opened: hit.candidate.title } : { search: hit.candidate.title }
+        return backend.performAction({ id: hit.candidate.id, arguments: hit.arguments })
       },
       getSearchHistory: function() { return frecencyStore.loaded ? frecencyStore.doc.searchHistory : [] }
     })

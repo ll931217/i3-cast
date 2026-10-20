@@ -13,12 +13,32 @@ import "../core/Arguments.js" as Args
 // Views form a navigation stack: root search or the alias editor. Each view keeps its own query.
 OverlayWindow {
   id: window
+  objectName: "launcherWindow"
 
   required property var backend
   property var appLibrary: null
 
   signal dismissRequested()
   signal settingsRequested()
+  signal outcomeRequested(var result)
+
+  property string resultSession: ""
+  property string continuation: ""
+  property var continuationTarget: null
+  property string promptRowRef: ""
+  property bool promptOwned: true
+  property bool refreshPending: false
+
+  function cancelPrompt() {
+    if (window.continuation && window.promptOwned) window.backend.callSync("rootSearch.cancelPrompt", { continuation: window.continuation })
+    window.continuation = ""
+    window.continuationTarget = null
+    window.promptRowRef = ""
+  }
+
+  function ensureSession() {
+    if (!window.resultSession) window.resultSession = window.backend.results.open()
+  }
 
   // ------------------------------------------------------------ settings
   readonly property var general: {
@@ -95,6 +115,13 @@ OverlayWindow {
   // The shell hid us: start the pop-to-root clock (SPEC §5.1).
   onShownChanged: {
     if (window.shown) return
+    window.cancelPrompt()
+    if (window.resultSession) window.backend.results.close(window.resultSession)
+    window.resultSession = ""
+    if (window.view.kind === "command") {
+      window.stack = [{ kind: "root", title: "x-cast", query: "" }]
+      window.query = ""
+    }
     window.actionPanelOpen = false
     var seconds = Number(window.general.popToRootTimeout)
     if (!(seconds > 0)) window.popToRoot()
@@ -136,13 +163,21 @@ OverlayWindow {
   // ---------------------------------------------------------------- rows
 
   function rebuild(resetSelection) {
+    if (!window.shown) return
+    window.ensureSession()
+    window.cancelPrompt()
+    window.refreshPending = false
     pointerGate.reset()
     var keepId = !resetSelection && window.selectedRow ? window.selectedRow.itemId : ""
     rows.clear()
-    if (window.view.kind === "alias") { window.select(-1); return }
+    if (window.view.kind === "alias") {
+      window.backend.results.replace(window.resultSession, [], window.query)
+      window.select(-1)
+      return
+    }
     var f = window.backend.callSync("rootSearch.getFilters", null)
     window.filters = f.ok ? f.data : []
-    var result = window.backend.callSync("rootSearch.search", { query: window.query, view: window.view, filter: window.typeFilter })
+    var result = window.backend.callSync("rootSearch.search", { query: window.query, view: window.view, filter: window.typeFilter, session: window.resultSession })
     if (!result.ok) {
       window.showToast("failure", result.error)
       window.select(-1)
@@ -165,6 +200,7 @@ OverlayWindow {
     return {
       rowKind: kind,
       itemId: String(c.id || ""),
+      resultRef: String(c.ref || ""),
       title: String(c.title || ""),
       subtitle: String(c.subtitle || ""),
       glyph: String(c.glyph || ""),
@@ -186,10 +222,11 @@ OverlayWindow {
   }
 
   function select(index) {
-    var previous = window.selectedRow ? window.selectedRow.itemId : ""
+    var previous = window.selectedRow ? window.selectedRow.resultRef : ""
     window.selectedIndex = index
     window.selectedRow = index >= 0 && index < rows.count ? rows.get(index) : null
-    if ((window.selectedRow ? window.selectedRow.itemId : "") !== previous) {
+    if ((window.selectedRow ? window.selectedRow.resultRef : "") !== previous) {
+      window.cancelPrompt()
       window.argValues = Args.initialValues(window.argSpecs)
       window.argFocus = -1
     }
@@ -234,18 +271,50 @@ OverlayWindow {
 
   function actionsForSelected() {
     if (!window.selectedRow) return []
-    var r = window.backend.callSync("rootSearch.getActions", { id: window.selectedRow.itemId, query: window.query })
+    var r = window.backend.callSync("rootSearch.getActions", { ref: window.selectedRow.resultRef })
     return r.ok ? r.data : []
   }
 
   function perform(actionId, index) {
     if (index !== undefined && index >= 0) window.select(index)
     if (!window.selectedRow) return
-    var id = window.selectedRow.itemId
+    var request = { ref: window.selectedRow.resultRef, arguments: window.argValues }
+    if (actionId) request.action = actionId
+    if (window.continuation && window.promptRowRef === window.selectedRow.resultRef) {
+      request = Object.assign({}, request, window.continuationTarget, { continuation: window.continuation })
+      // A stored-ID continuation must not also carry the displayed ref.
+      if (window.continuationTarget.id) delete request.ref
+      window.continuation = ""
+    }
+    var r = window.backend.callSync("rootSearch.performAction", request)
     window.actionPanelOpen = false
-    var r = window.backend.callSync("rootSearch.performAction", { id: id, action: actionId, query: window.query, arguments: window.argValues })
-    if (!r.ok) { window.showToast("failure", r.error, [{ title: "Copy Error", copy: r.error }]); return }
-    var outcome = r.data || {}
+    window.outcomeRequested(r)
+  }
+
+  function showPrompt(outcome, owned) {
+    var candidate = outcome.candidate
+    window.cancelPrompt()
+    window.ensureSession()
+    // A prompt from the displayed row keeps its generation alive. A direct run
+    // gets an exact one-row view, never a title search that loses arguments.
+    if (!outcome.target.ref || !window.selectedRow || window.selectedRow.resultRef !== outcome.target.ref) {
+      var sections = window.backend.results.replace(window.resultSession, [{ id: "prompt", rows: [candidate] }], "")
+      window.stack = [{ kind: "root", title: "x-cast", query: "" }, { kind: "command", title: candidate.title, query: "" }]
+      window.query = ""
+      rows.clear()
+      rows.append(window.rowData(sections[0].rows[0], "item"))
+      window.select(0)
+    }
+    window.promptOwned = owned !== false
+    window.continuation = outcome.continuation
+    window.continuationTarget = outcome.target
+    window.promptRowRef = window.selectedRow.resultRef
+    window.argValues = outcome.arguments || []
+    window.argFocus = outcome.prompt.kind === "arguments" ? Args.missingRequired(window.argValues, window.argSpecs) : -1
+    window.showToast("success", outcome.prompt.title || (outcome.prompt.kind === "confirmation" ? "Press Enter to confirm" : "Complete the arguments"))
+  }
+
+  function applyOutcome(outcome) {
     if (outcome.push) { window.push(outcome.push); return }
     if (outcome.close) {
       if (outcome.settings) window.settingsRequested()
@@ -267,6 +336,8 @@ OverlayWindow {
 
   // nth action of the selected row: 0 primary (↵), 1 secondary (Ctrl ↵).
   function performNth(n) {
+    // Enter accepts the pending action, not whichever action is currently primary.
+    if (n === 0 && window.continuation) { window.perform(""); return }
     var list = window.actionsForSelected()
     if (list.length > n) window.perform(list[n].id)
   }
@@ -437,7 +508,7 @@ OverlayWindow {
       if (alt && shift && key === Qt.Key_D) { window.performIfOffered(["disable"]); return true }
       if (ctrl && key >= Qt.Key_1 && key <= Qt.Key_9) {
         var target = window.nthItem(key - Qt.Key_0)
-        if (target >= 0) window.perform("open", target)
+        if (target >= 0) window.perform("", target)
         return true
       }
     }
@@ -482,7 +553,17 @@ OverlayWindow {
   // edited): refresh what is on screen without losing the selection.
   Connections {
     target: window.backend
-    function onCandidatesRevisionChanged() { if (window.shown && !window.actionPanelOpen) window.rebuild(false) }
+    function onCandidatesRevisionChanged() {
+      if (!window.shown) return
+      if (window.actionPanelOpen || window.continuation) window.refreshPending = true
+      else window.rebuild(false)
+    }
+  }
+
+  onActionPanelOpenChanged: {
+    if (!window.actionPanelOpen && window.refreshPending) Qt.callLater(function() {
+      if (window.shown && !window.actionPanelOpen && !window.continuation && window.refreshPending) window.rebuild(false)
+    })
   }
 
   // ================================================================== UI
@@ -678,7 +759,7 @@ OverlayWindow {
           // Only a real pointer move selects: a row sliding under a still
           // pointer (open, typing, scrolling) must not steal the cursor.
           onHovered: function(i, item, mouse) { if (!window.actionPanelOpen && pointerGate.moved(item, mouse)) window.select(i) }
-          onClicked: function(i) { window.perform("open", i) }
+          onClicked: function(i) { window.perform("", i) }
         }
       }
 

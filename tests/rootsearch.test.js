@@ -90,6 +90,18 @@ test("actions: primary first, favourites and alias offered", () => {
   assert.ok(ids.includes("favorite-add") && ids.includes("set-alias") && ids.includes("copy-id"))
 })
 
+test("actions without provider-owned entries stay empty rather than promoting generic actions", () => {
+  const app = RS.decorate(Apps.appCandidate(apps[0]), ctx({
+    commands: { 'app:firefox': { favoriteOrder: 0, alias: 'ff' } },
+    frecency: { 'app:firefox': Frecency.recordVisit(null, NOW - 1000, 'firefox') }
+  }), deps)
+  for (const flags of [{}, { fallback: true }, { answer: true }]) {
+    const candidate = Object.assign({}, app, flags)
+    assert.deepEqual(RS.actionsFor(candidate, []), [])
+    assert.deepEqual(RS.actionsFor(candidate), [])
+  }
+})
+
 test("favourite reordering", () => {
   const cmds = { a: { favoriteOrder: 0 }, b: { favoriteOrder: 1 }, c: {} }
   assert.deepEqual(RS.reorderFavorites(cmds, "c", "favorite-add"), { a: 0, b: 1, c: 2 })

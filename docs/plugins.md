@@ -51,8 +51,13 @@ x-cast prefixes ids with your provider id so plugins cannot collide. Your code a
 | `visit` | Count it as a launch for ranking. |
 | `toast` | `{"style": "success" or "failure", "title": str, "actions": [...]}`. A toast action is `{"title", "copy": text}` or `{"title", "open": url}`. Ctrl+T opens them. |
 | `hud` | Text for a desktop notification once the window closes. |
+| `prompt` | Optional `{"kind": "confirmation" or "arguments", "title": str}`. Requests input before starting the action; cannot accompany `close` or `visit`. |
 
-An exception in `perform` is caught and shown as a failure toast with a "Copy Error" action. A plugin that fails to load is skipped, and the traceback goes to the host's stderr.
+Exceptions and malformed `perform` outcomes become failure feedback with a "Copy Error" action. The action is never automatically retried: side effects may already have occurred. Diagnostic summaries identify the provider, operation and exception type without including argument values or arbitrary plugin payloads. A plugin that fails to load is skipped.
+
+A prompt means the action has **not started**. On confirmation, the host calls the same action again with `ctx["confirmed"] = True`, bound to the same candidate and argument values. Changing arguments requires confirmation again. Argument prompts are collected before dispatch; ordinary toasts never imply confirmation. Hidden hotkey/link prompts open the launcher on the exact command with supplied arguments retained. Ordinary hidden failures use desktop notifications.
+
+Displayed rows retain a private snapshot of their JSON `data` and query. `actions_for` and `perform` receive copies of that snapshot, not a newly generated row. Replacing displayed results or closing the launcher expires its references; opening the action panel does not. Invalid entries in candidate, answer, fallback, filter or action lists are skipped individually; valid siblings remain in order. Invalid list containers safely contribute no rows and generate diagnostics. `None` from `perform` still means "not mine"; malformed outcomes do not.
 
 ## Optional provider methods
 
@@ -61,6 +66,14 @@ An exception in `perform` is caught and shown as a failure toast with a "Copy Er
 `filters()` returns `[{"id", "title"}]`. They are added to the Ctrl+P dropdown, and picking one shows only your rows whose `category` equals its id.
 
 `fallbacks(query)` returns rows for the "Use "query" with..." section. Each row is a candidate dict whose `perform` gets the query in `ctx["query"]`.
+
+## Search references over IPC
+
+`rootSearch.search` without a session remains a detached inspection: it does not alter the launcher's displayed results. Stored commands can still execute by ID. Virtual answers and fallbacks require a live opaque `ref`, not their candidate ID.
+
+For executable search results, call `rootSearch.openSession`, then `rootSearch.search` with `{session, query}`. Pass the returned row's `ref` to `rootSearch.getActions` or `rootSearch.performAction`; omit `action` to use the provider's first offered action. Each replacement expires that session's previous refs. Finish with `rootSearch.closeSession` (`{session}`). Sessions are independent, have no timeout, and are capped at 32; explicitly close unused sessions.
+
+A prompt outcome includes `continuation`, `target`, `candidate` and `arguments`. Resume with the original `target` fields, the `continuation` and current `arguments`. Enter accepts the pending action; an explicit different action or changed arguments requires fresh confirmation. External callers own their continuations: cancel abandoned ones with `rootSearch.cancelPrompt` (`{continuation}`), including when closing their result session. At most 128 prompts may be pending. Showing a different caller's prompt does not cancel another caller's continuation. No reference or continuation survives host restart.
 
 ## The `api` object
 
@@ -91,4 +104,4 @@ The bundled `script_commands.py` reads Raycast-format scripts from `~/.config/x-
 echo "hello $1"
 ```
 
-Press Tab to move into the argument pills, type a value, then Enter. All modes (`compact`, `silent`, `fullOutput`) run in the background and show the last output line as a notification. `inline` scripts need `# @raycast.refreshTime 10s` (or `5m`, `1h`, `1d`; at least 10 s) and no arguments. Their last output line becomes the row's subtitle and refreshes in the background. `# @raycast.needsConfirmation true` asks for a second Enter within 5 seconds. Each script's `packageName` is a Ctrl+P filter.
+Press Tab to move into the argument pills, type a value, then Enter. All modes (`compact`, `silent`, `fullOutput`) run in the background and show the last output line as a notification. `inline` scripts need `# @raycast.refreshTime 10s` (or `5m`, `1h`, `1d`; at least 10 s) and no arguments. Their last output line becomes the row's subtitle and refreshes in the background. `# @raycast.needsConfirmation true` asks for explicit Enter confirmation tied to the current command, action and arguments. Confirmation has no timer; closing or abandoning the prompt cancels it. Each script's `packageName` is a Ctrl+P filter.

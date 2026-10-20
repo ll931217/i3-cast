@@ -97,6 +97,8 @@ How the rest of this spec maps onto it:
 - **§10 frontend.** QML instead of React, with themes from Omarchy's tokens. The 8 Raycast themes (§10.4) become optional palettes over the same tokens.
 - **Logging** goes to the shell's log (`qs log -n -p "$OMARCHY_PATH/shell"`, lines prefixed `[x-cast]`), with the level from `config.json`. There are no separate log files.
 
+**X11 host and module deepening [D, 2026-10-20].** The current host is PySide6 on X11 (see `CLAUDE.md`), rather than Omarchy. `core/Results.js` owns per-caller displayed snapshots; virtual rows execute through opaque references, never by regenerating provider output. Replacement or close expires displayed references; action panels defer refresh. `core/Execution.js` owns primary-action choice, argument/confirmation continuations and visit accounting; QML owns presentation for selected rows, direct runs and links. Script confirmation is invocation-bound with no timer. Python plugin methods remain compatible, while invocation, normalization and JSON serialization are failure-contained. See `docs/plugins.md` for prompt and IPC reference contracts.
+
 The original Tauri design follows, kept for reference and for non-Omarchy targets.
 
 ```

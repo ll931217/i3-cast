@@ -54,19 +54,31 @@ Item {
 
   // Open a command directly (`x-cast run <id>`, later per-command
   // hotkeys). It counts as a launch for frecency, like Raycast's hotkeys.
-  function run(commandId) {
-    var r = backend.callSync("rootSearch.performAction", { id: commandId, action: "open", query: "" })
-    if (!r.ok) return r
-    var outcome = r.data || {}
-    if (outcome.push) {
+  function present(result, owned) {
+    if (!result.ok) {
+      if (root.opened) launcher.showToast("failure", result.error, [{ title: "Copy Error", copy: result.error }])
+      else launcher.hud(result.error)
+      return
+    }
+    var outcome = result.data || {}
+    if (outcome.prompt) {
       root.show()
-      launcher.popToRoot()
-      launcher.push(outcome.push)
-    } else if (outcome.close) {
-      root.hide()
+      launcher.showPrompt(outcome, owned === true)
+    } else if (outcome.push) {
+      root.show()
+      launcher.applyOutcome(outcome)
+    } else if (root.opened) {
+      launcher.applyOutcome(outcome)
+    } else {
       if (outcome.settings) root.openSettings()
       if (outcome.hud) launcher.hud(outcome.hud)
+      if (outcome.toast) launcher.hud(outcome.toast.title)
     }
+  }
+
+  function run(commandId) {
+    var r = backend.callSync("rootSearch.performAction", { id: commandId })
+    root.present(r, true)
     return r
   }
 
@@ -82,6 +94,7 @@ Item {
     appLibrary: backend.appLibrary
     onDismissRequested: root.hide()
     onSettingsRequested: root.openSettings()
+    onOutcomeRequested: function(result) { root.present(result, true) }
   }
 
   SettingsWindow {
@@ -138,7 +151,9 @@ Item {
           return JSON.stringify({ ok: false, error: "data is not JSON: " + e })
         }
       }
-      return JSON.stringify(backend.callSync(method, data))
+      var result = backend.callSync(method, data)
+      if (method === "rootSearch.openLink" || method === "rootSearch.performAction") root.present(result, false)
+      return JSON.stringify(result)
     }
   }
 }

@@ -7,8 +7,8 @@ format, so scripts from raycast/script-commands work unchanged.
 Supported: title, mode, packageName, icon, description, currentDirectoryPath, argument1..3.
 [D] compact, silent and fullOutput run in the background and report the last output line as a
 notification. `inline` shows the last output line as the row's subtitle and re-runs it every
-`refreshTime` (10s, 5m, 1h, 1d; at least 10s). `needsConfirmation true` asks for a second Enter
-within 5 seconds.
+`refreshTime` (10s, 5m, 1h, 1d; at least 10s). `needsConfirmation true` asks for explicit
+confirmation bound to this command and its arguments.
 """
 import json
 import os
@@ -24,7 +24,6 @@ MAX_BYTES = 2 * 1024 * 1024
 HEADER_LINES = 60
 TIMEOUT_SECONDS = 120
 MIN_REFRESH_SECONDS = 10
-CONFIRM_WINDOW_SECONDS = 5
 REFRESH = re.compile(r"^(\d+)\s*([smhd])$")
 UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -145,7 +144,6 @@ class ScriptCommands:
         self.api = api
         self.inline = {}      # path -> (finished at, text)
         self.running = set()  # inline paths being refreshed
-        self.pending = {}     # path -> when the first Enter happened
         settings = api.settings(self.id)
         configured = settings.get("directories")
         self.directories = [Path(d).expanduser() for d in configured] if isinstance(configured, list) and configured \
@@ -199,11 +197,8 @@ class ScriptCommands:
         if action not in ("run", "open"):
             return None
         script = candidate["data"]
-        if script["confirm"]:
-            first = self.pending.pop(script["path"], 0)
-            if time.time() - first > CONFIRM_WINDOW_SECONDS:
-                self.pending[script["path"]] = time.time()
-                return {"toast": {"style": "success", "title": "Press Enter again to run %s" % script["title"]}}
+        if script["confirm"] and ctx.get("confirmed") is not True:
+            return {"prompt": {"kind": "confirmation", "title": "Press Enter to run %s" % script["title"]}}
         try:
             args = build_args(script, ctx.get("arguments") or [])
         except ValueError as e:

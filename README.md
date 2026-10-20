@@ -93,6 +93,8 @@ x-cast doctor
 
 ```sh
 node --test tests/*.test.js   # unit tests for plugin/core
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+.venv/bin/python tests/qml-integration.py  # isolated offscreen Qt; no live desktop needed
 tests/smoke.sh                # live check against the running host (shows and hides the window, never types)
 docs/capture.sh               # regenerate docs/screenshots with a throwaway host (types into the launcher after checking focus)
 ```

@@ -104,6 +104,27 @@ class InlineAndConfirmTests(unittest.TestCase):
         s = sc.parse_script(p, self.BASE + "# @raycast.mode inline\n# @raycast.refreshTime 1m\n")
         self.assertEqual((s["mode"], s["refresh"]), ("inline", 60))
 
+    def test_confirmation_requires_an_explicit_invocation_marker(self):
+        class Api:
+            def __init__(self, root):
+                self.root, self.runs = root, 0
+            def settings(self, _pid): return {}
+            def config_dir(self): return self.root
+            def watch(self, _path): pass
+            def run_in_background(self, _work, _done): self.runs += 1
+        with tempfile.TemporaryDirectory() as directory:
+            api = Api(Path(directory))
+            provider = sc.ScriptCommands(api)
+            script = sc.parse_script(Path('/x.sh'), self.BASE + '# @raycast.mode silent\n# @raycast.needsConfirmation true\n')
+            candidate = {'data': script}
+            first = provider.perform(candidate, 'run', {'arguments': []})
+            second = provider.perform(candidate, 'run', {'arguments': []})
+            self.assertEqual(first['prompt']['kind'], 'confirmation')
+            self.assertEqual(second['prompt']['kind'], 'confirmation')
+            self.assertEqual(api.runs, 0)
+            self.assertTrue(provider.perform(candidate, 'run', {'arguments': [], 'confirmed': True})['visit'])
+            self.assertEqual(api.runs, 1)
+
     def test_needs_confirmation_flag(self):
         s = sc.parse_script(Path("/x.sh"), self.BASE + "# @raycast.mode silent\n# @raycast.needsConfirmation true\n")
         self.assertTrue(s["confirm"])

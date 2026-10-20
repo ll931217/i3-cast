@@ -189,34 +189,56 @@ class PluginHost(QObject):
                 self._record("background", "done", traceback.format_exc())
 
     def _record(self, who, during, text):
+        # Diagnostics must not grow without bound over repeated search refreshes.
+        who, during, text = str(who)[:120], str(during)[:80], str(text)[:1000]
         self._errors.append({"plugin": who, "during": during, "error": text})
+        del self._errors[:-100]
         print("x-cast: plugin %s failed during %s:\n%s" % (who, during, text), file=sys.stderr)
+
+    def _failure(self, provider_id, during, error, entry=None):
+        # Exception messages, reprs and tracebacks can contain passwords/data.
+        text = "entry %d: " % entry if entry is not None else ""
+        text += "plugin operation failed (%s)" % type(error).__name__[:120]
+        self._record(provider_id, during, text)
+        return text
+
+    def _list(self, provider_id, during, invoke, normalize):
+        """Contain invocation, normalization and strict serialization at the slot seam."""
+        try:
+            rows = invoke(self._providers[provider_id])
+            if not isinstance(rows, list):
+                raise TypeError("expected list")
+            out = []
+            for i, raw in enumerate(rows):
+                try:
+                    if not isinstance(raw, dict):
+                        raise TypeError("expected object entry")
+                    out.append(json.dumps(normalize(raw, i), allow_nan=False))
+                except Exception as error:
+                    self._failure(provider_id, during, error, i)
+            return "[" + ",".join(out) + "]"
+        except Exception as error:
+            self._failure(provider_id, during, error)
+            return "[]"
 
     # ------------------------------------------------- the QML-facing surface
 
-    def _call(self, provider_id, during, fn, fallback):
-        try:
-            return fn(self._providers[provider_id])
-        except Exception:
-            self._record(provider_id, during, traceback.format_exc())
-            return fallback
-
     @Slot(result=str)
     def providers(self):
-        return json.dumps([{"id": pid, "hasFallbacks": callable(getattr(p, "fallbacks", None)),
-                            "hasFilters": callable(getattr(p, "filters", None)),
-                            "hasAnswers": callable(getattr(p, "answers", None))}
-                           for pid, p in self._providers.items()])
+        out = []
+        for pid, provider in self._providers.items():
+            try:
+                out.append(json.dumps({"id": pid, "hasFallbacks": callable(getattr(provider, "fallbacks", None)),
+                                       "hasFilters": callable(getattr(provider, "filters", None)),
+                                       "hasAnswers": callable(getattr(provider, "answers", None))}, allow_nan=False))
+            except Exception as error:
+                self._failure(pid, "providers", error)
+        return "[" + ",".join(out) + "]"
 
     @Slot(str, str, result=str)
     def answers(self, provider_id, query):
-        rows = self._call(provider_id, "answers", lambda p: p.answers(query), [])
-        out = []
-        for i, raw in enumerate(rows or []):
-            raw = dict(raw)
-            raw.setdefault("id", "answer-%d" % i)
-            out.append(normalize_candidate(provider_id, raw))
-        return json.dumps(out)
+        return self._list(provider_id, "answers", lambda p: p.answers(query),
+                          lambda raw, i: normalize_candidate(provider_id, {"id": "answer-%d" % i, **raw}))
 
     def copy(self, text):
         try:
@@ -229,55 +251,108 @@ class PluginHost(QObject):
 
     @Slot(str, result=str)
     def filters(self, provider_id):
-        rows = self._call(provider_id, "filters", lambda p: p.filters(), [])
-        return json.dumps([{"id": str(f["id"]), "title": str(f.get("title") or f["id"])}
-                           for f in rows or [] if isinstance(f, dict) and "id" in f])
+        return self._list(provider_id, "filters", lambda p: p.filters(),
+                          lambda raw, i: {"id": str(raw["id"]), "title": str(raw.get("title") or raw["id"])})
 
     @Slot(str, result=str)
     def candidates(self, provider_id):
-        rows = self._call(provider_id, "candidates", lambda p: p.candidates(), [])
-        out = []
-        for raw in rows or []:
-            try:
-                out.append(normalize_candidate(provider_id, raw))
-            except (KeyError, TypeError):
-                self._record(provider_id, "candidates", "a candidate needs at least an 'id': %r" % (raw,))
-        return json.dumps(out)
+        return self._list(provider_id, "candidates", lambda p: p.candidates(),
+                          lambda raw, i: normalize_candidate(provider_id, raw))
 
     @Slot(str, str, result=str)
     def fallbacks(self, provider_id, query):
-        rows = self._call(provider_id, "fallbacks", lambda p: p.fallbacks(query), [])
-        out = []
-        for i, raw in enumerate(rows or []):
-            raw = dict(raw)
-            raw.setdefault("id", "fallback-%d" % i)
-            candidate = normalize_candidate(provider_id, raw, searching_only=True)
+        def normalize(raw, i):
+            candidate = normalize_candidate(provider_id, {"id": "fallback-%d" % i, **raw}, searching_only=True)
             candidate["subtitle"] = str(raw.get("subtitle", query))
             candidate["typeLabel"] = str(raw.get("type_label") or "Fallback")
-            out.append(candidate)
-        return json.dumps(out)
+            return candidate
+        return self._list(provider_id, "fallbacks", lambda p: p.fallbacks(query), normalize)
 
     @Slot(str, str, result=str)
     def actionsFor(self, provider_id, candidate_json):
-        candidate = self._local(provider_id, json.loads(candidate_json))
-        actions = self._call(provider_id, "actions_for", lambda p: p.actions_for(candidate), [])
-        return json.dumps([a for a in actions or [] if isinstance(a, dict) and "id" in a and "title" in a])
+        def invoke(provider):
+            candidate = self._local(provider_id, self._decode(candidate_json))
+            return provider.actions_for(candidate)
+        def normalize(raw, i):
+            if (not isinstance(raw.get("id"), str) or not raw["id"]
+                    or not isinstance(raw.get("title"), str) or not raw["title"]):
+                raise TypeError("action needs non-empty id and title strings")
+            return raw
+        return self._list(provider_id, "actions_for", invoke, normalize)
 
     @Slot(str, str, str, str, result=str)
     def perform(self, provider_id, candidate_json, action, ctx_json):
-        candidate = self._local(provider_id, json.loads(candidate_json))
-        ctx = json.loads(ctx_json)
+        invoked = False
         try:
-            outcome = self._providers[provider_id].perform(candidate, action, ctx)
-        except Exception as e:
-            self._record(provider_id, "perform", traceback.format_exc())
-            message = "%s failed: %s" % (candidate.get("title"), e)
-            outcome = {"toast": {"style": "failure", "title": message, "actions": [{"title": "Copy Error", "copy": message}]}}
-        return json.dumps(outcome if isinstance(outcome, dict) else None)
+            candidate = self._local(provider_id, self._decode(candidate_json))
+            ctx = self._decode(ctx_json)
+            if not isinstance(ctx, dict):
+                raise TypeError("expected context object")
+            if "query" in ctx and not isinstance(ctx["query"], str):
+                raise TypeError("expected query string")
+            if "arguments" in ctx and (not isinstance(ctx["arguments"], list)
+                                       or not all(isinstance(a, str) for a in ctx["arguments"])):
+                raise TypeError("expected argument strings")
+            perform = self._providers[provider_id].perform
+            invoked = True
+            outcome = perform(candidate, action, ctx)
+            self._validate_outcome(outcome)
+            return json.dumps(outcome, allow_nan=False)
+        except Exception as error:
+            detail = self._failure(provider_id, "perform", error)
+            message = "%s perform failed: %s" % (str(provider_id)[:120], detail)
+            if invoked:
+                message += "; side effects may already have occurred"
+            return json.dumps({"toast": {"style": "failure", "title": message,
+                                        "actions": [{"title": "Copy Error", "copy": message}]}}, allow_nan=False)
+
+    @staticmethod
+    def _decode(text):
+        def invalid_constant(value):
+            raise ValueError("non-finite JSON number")
+        return json.loads(text, parse_constant=invalid_constant)
+
+    @staticmethod
+    def _validate_outcome(outcome):
+        # Unknown fields are deliberately retained for forward-compatible wire JSON.
+        if outcome is None:
+            return
+        if not isinstance(outcome, dict):
+            raise TypeError("expected outcome object or None")
+        for key in ("close", "visit", "settings"):
+            if key in outcome and not isinstance(outcome[key], bool):
+                raise TypeError("expected outcome boolean")
+        if "hud" in outcome and not isinstance(outcome["hud"], str):
+            raise TypeError("expected HUD text")
+        if "push" in outcome and not isinstance(outcome["push"], dict):
+            raise TypeError("expected navigation object")
+        if "prompt" in outcome:
+            prompt = outcome["prompt"]
+            if (not isinstance(prompt, dict) or prompt.get("kind") not in ("arguments", "confirmation")
+                    or ("title" in prompt and not isinstance(prompt["title"], str))
+                    or "close" in outcome or "visit" in outcome):
+                raise TypeError("invalid prompt outcome")
+        if "toast" in outcome:
+            toast = outcome["toast"]
+            if (not isinstance(toast, dict) or toast.get("style") not in ("success", "failure")
+                    or not isinstance(toast.get("title"), str)):
+                raise TypeError("invalid toast")
+            actions = toast.get("actions", [])
+            if not isinstance(actions, list):
+                raise TypeError("expected toast actions list")
+            for action in actions:
+                if (not isinstance(action, dict) or not isinstance(action.get("title"), str)
+                        or not ("copy" in action or "open" in action)):
+                    raise TypeError("invalid toast action")
+                for key in ("copy", "open"):
+                    if key in action and not isinstance(action[key], str):
+                        raise TypeError("expected toast action text")
 
     @staticmethod
     def _local(provider_id, candidate):
         """The candidate as the plugin made it: local id, its own data."""
+        if not isinstance(candidate, dict) or not isinstance(candidate.get("id"), str):
+            raise TypeError("expected candidate object with string id")
         local = dict(candidate)
         prefix = provider_id + ":"
         if local.get("id", "").startswith(prefix):

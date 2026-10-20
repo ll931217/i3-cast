@@ -105,7 +105,11 @@ cmd_open_raycast() {
   reply=$(ipc call rootSearch.openLink "$request")
   query=$(printf '%s' "$reply" | "$python" -c '
 import json, sys
-d = json.load(sys.stdin).get("data") or {}
+reply = json.load(sys.stdin)
+if not reply.get("ok"):
+    print(reply.get("error") or "link execution failed", file=sys.stderr)
+    sys.exit(2)
+d = reply.get("data") or {}
 if d.get("unsupported"):
     sys.exit(3)
 print(d.get("search", ""))') || { [[ $? -eq 3 ]] && die "not a command link x-cast can open: $1"; die "bad reply from the host: $reply"; }
