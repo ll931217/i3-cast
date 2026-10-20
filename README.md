@@ -98,3 +98,12 @@ docs/capture.sh               # regenerate docs/screenshots with a throwaway hos
 ```
 
 Behaviour comes from a static reverse-engineering pass over Raycast; see `SPEC.md` and `reference/`. No Raycast code is included.
+
+## Plugins and settings
+
+- Drop a Python file in `~/.config/x-cast/plugins/` to add commands. See [docs/plugins.md](docs/plugins.md).
+- Script Commands (Raycast format) work out of the box from `~/.config/x-cast/script-commands`.
+- `x-cast settings` opens the settings window (also the "x-cast Settings" command). A value set in `config.yaml` wins and locks its row.
+- Tab moves into argument pills. Ctrl+P opens the type filter. Ctrl+T opens the toast's actions.
+- `navigation_bindings: vim-motions` gives Ctrl+J/K/H/L. The action panel then moves to Ctrl+Shift+K.
+- With `from_alacritty`, the card outline uses the Alacritty cursor color.
