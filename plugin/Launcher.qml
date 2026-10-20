@@ -1,31 +1,23 @@
 import QtQuick
 import Quickshell
-import Quickshell.Hyprland
 import qs.Commons
 import "ui"
 
-// x-cast: a Raycast-style launcher as an Omarchy shell plugin.
+// x-cast: a Raycast-style launcher for X11 window managers (i3).
 //
-// omarchy-shell loads this once (keepLoaded) and calls open(payloadJson) on
-// summon and close() on hide. Everything else reaches it three ways, all of
-// which end in toggle()/show()/hide():
-//   - the Hyprland global shortcut x-cast:toggle (no process per keypress)
-//   - `x-cast toggle` -> omarchy-shell x-cast toggle (shell socket)
-//   - `omarchy-shell shell toggle typecraft.x-cast`
+// The host (host/main.py) loads this once and keeps it alive. `x-cast toggle`
+// reaches toggle()/show()/hide() through the host's control socket, which
+// dispatches to the ShellIpc object at the bottom of this file.
 Item {
   id: root
 
-  // Injected by the shell's panel loader.
-  property string omarchyPath: Quickshell.env("OMARCHY_PATH")
+  // Injected by the host: the desktop-entry app library.
   property var shell: null
-  property var manifest: null
-
-  readonly property string pluginId: (root.manifest && root.manifest.id) || "typecraft.x-cast"
 
   property bool opened: false
   property double openedAt: 0
 
-  // ------------------------------------------------------- shell lifecycle
+  // ------------------------------------------------------- window lifecycle
 
   function open(payloadJson) {
     var payload = ({})
@@ -45,21 +37,11 @@ Item {
 
   // ---------------------------------------------------------- our controls
 
-  // Route through the shell when it is there so its open-panel bookkeeping
-  // matches; it calls open()/close() back.
   function show() {
-    if (root.opened) return
-    if (root.shell && root.shell.summon(root.pluginId, "{}")) return
-    root.open("{}")
+    if (!root.opened) root.open("{}")
   }
 
   function hide() {
-    if (!root.opened) return
-    if (root.shell && root.shell.hide(root.pluginId)) {
-      // The shell calls close(); make sure even if it did not.
-      root.close()
-      return
-    }
     root.close()
   }
 
@@ -88,7 +70,6 @@ Item {
   Backend {
     id: backend
     appLibrary: root.shell ? root.shell.appLibrary : null
-    summon: function(id, payload) { return root.shell ? root.shell.summon(id, payload) : false }
   }
 
   LauncherWindow {
@@ -97,15 +78,6 @@ Item {
     backend: backend
     appLibrary: backend.appLibrary
     onDismissRequested: root.hide()
-  }
-
-  // Bound as hl.dsp.global("x-cast:toggle"); see `x-cast setup hyprland`.
-  // The name is fixed: a GlobalShortcut cannot be renamed once registered.
-  GlobalShortcut {
-    appid: "x-cast"
-    name: "toggle"
-    description: "Toggle x-cast"
-    onPressed: root.toggle()
   }
 
   ShellIpc {
@@ -134,8 +106,7 @@ Item {
       return "ok"
     }
 
-    // Ids as rootSearch.search reports them: app:<desktop-id>,
-    // omarchy:<menu-id>, builtin:<name>.
+    // Ids as rootSearch.search reports them: app:<desktop-id>.
     function run(commandId: string): string {
       return JSON.stringify(root.run(commandId))
     }

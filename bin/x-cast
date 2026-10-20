@@ -1,174 +1,53 @@
 #!/bin/bash
-# x-cast: control the x-cast launcher plugin running inside omarchy-shell.
-#
-# Runtime calls go through omarchy-shell, which answers over the shell's own
-# socket (~5 ms). The launcher hotkey does not use this script at all: it is a
-# Hyprland global shortcut, x-cast:toggle, that the plugin registers.
+# x-cast: control the x-cast launcher host (host/main.py) over its unix socket.
+# The host starts on first use, so an i3 binding only needs `x-cast toggle`.
 
 set -uo pipefail
 
-PLUGIN_ID="typecraft.x-cast"
-IPC_TARGET="x-cast"
-
 self=$(readlink -f "${BASH_SOURCE[0]}")
 repo=$(cd "$(dirname "$self")/.." && pwd)
-plugin_src="$repo/plugin"
-plugins_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
-plugin_link="$plugins_dir/$PLUGIN_ID"
-
-# Our links in the plugins dir: the install link, or a reload link (below).
-installed_links() {
-  local link
-  for link in "$plugin_link" "$plugin_link".dev-*; do
-    [[ -L $link && $(readlink -f "$link") == "$plugin_src" ]] && printf '%s\n' "$link"
-  done
-}
-
-current_link() { installed_links | tail -n1; }
-hypr_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+sock="${XDG_RUNTIME_DIR:-/tmp}/x-cast.sock"
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/x-cast"
+python="$repo/.venv/bin/python"
 
 usage() {
   cat <<USAGE
 Usage: x-cast <command> [args]
 
-Launcher
-  toggle                 Show or hide the launcher
-  show | hide            Show or hide it
-  run <commandId>        Open a command directly
+  toggle | show | hide   Show or hide the launcher
+  run <commandId>        Open a command directly, e.g. app:firefox
   call <method> [json]   Call a backend method, e.g. x-cast call system.info
-
-Setup
-  install                Link the plugin into omarchy-shell, enable it, and link this CLI into ~/.local/bin
-  uninstall              Disable and unlink the plugin
-  reload                 Make the shell reload the plugin after editing it
-  dev                    Reload the plugin on every save under plugin/
-  host                   Run the X11 host in the foreground (i3; started on first toggle otherwise)
-  setup hyprland         Bind Alt+Space to the launcher in ~/.config/hypr/x-cast.lua
+  host                   Run the host in the foreground (logs on the terminal)
+  setup i3               Bind \$mod+d to the launcher in ~/.config/i3/config
   doctor                 Check that the pieces are in place
+
+Options live in $config_dir/config.yaml and theme.yaml.
 USAGE
 }
 
 die() { echo "x-cast: $*" >&2; exit 1; }
 
-sock="${XDG_RUNTIME_DIR:-/tmp}/x-cast.sock"
+start_host() {
+  [[ -x $python ]] || die "no $python; run: python3 -m venv .venv && .venv/bin/pip install -r host/requirements.txt"
+  setsid "$python" "$repo/host/main.py" >/dev/null 2>&1 &
+  for _ in {1..50}; do [[ -S $sock ]] && return; sleep 0.1; done
+  die "the host did not start; run 'x-cast host' to see why"
+}
 
-# Omarchy: through the shell. X11 (i3): through the host's unix socket, starting the host on first use.
 ipc() {
-  if command -v omarchy-shell >/dev/null; then
-    omarchy-shell "$IPC_TARGET" "$@"
-    return
-  fi
-  if [[ ! -S $sock ]]; then
-    setsid "$repo/.venv/bin/python" "$repo/host/main.py" >/dev/null 2>&1 &
-    for _ in {1..50}; do [[ -S $sock ]] && break; sleep 0.1; done
-  fi
+  [[ -S $sock ]] || start_host
   printf '%s\n' "$*" | nc -U -q0 "$sock"
 }
 
-need_shell() {
-  command -v omarchy-shell >/dev/null || die "omarchy-shell not found; x-cast runs inside the Omarchy shell"
-}
-
-cmd_install() {
-  need_shell
-  [[ -f $plugin_src/manifest.json ]] || die "plugin source missing at $plugin_src"
-  mkdir -p "$plugins_dir"
-  if [[ -e $plugin_link && ! -L $plugin_link ]]; then
-    die "$plugin_link exists and is not a symlink; move it away first"
-  fi
-  ln -sfn "$plugin_src" "$plugin_link"
-  echo "linked $plugin_link -> $plugin_src"
-
-  mkdir -p "$HOME/.local/bin"
-  if [[ ! -e $HOME/.local/bin/x-cast || -L $HOME/.local/bin/x-cast ]]; then
-    ln -sfn "$self" "$HOME/.local/bin/x-cast"
-    echo "linked ~/.local/bin/x-cast"
-  fi
-
-  omarchy-shell -q shell rescanPlugins
-  # The scan runs in the background; enable answers "not ready" until it lands.
-  local out i
-  for i in $(seq 1 50); do
-    out=$(omarchy plugin enable "$PLUGIN_ID" 2>&1) && break
-    [[ $out == *"not ready"* || $out == *"could not find"* || $out == *"not known"* ]] || break
-    sleep 0.1
-  done
-  [[ -n $out ]] && echo "$out"
-
-  for i in $(seq 1 100); do
-    [[ $(omarchy-shell "$IPC_TARGET" ping 2>/dev/null) == "ok" ]] && { echo "x-cast is running"; return 0; }
-    sleep 0.1
-  done
-  die "plugin did not answer; check the shell log with: qs log -n -p \"\$OMARCHY_PATH/shell\""
-}
-
-cmd_uninstall() {
-  need_shell
-  omarchy plugin disable "$PLUGIN_ID" 2>/dev/null || true
-  local link
-  while IFS= read -r link; do
-    [[ -n $link ]] && rm "$link" && echo "removed $link"
-  done < <(installed_links)
-  omarchy-shell -q shell rescanPlugins
-  if [[ -L $HOME/.local/bin/x-cast && $(readlink -f "$HOME/.local/bin/x-cast") == "$self" ]]; then
-    rm "$HOME/.local/bin/x-cast" && echo "removed ~/.local/bin/x-cast"
-  fi
-}
-
-# Reloading after an edit needs two things the shell will not do for a
-# symlinked plugin: its inotify watch does not follow the link into the repo,
-# and Quickshell keeps every QML file it has read, by path, for the life of
-# the process (clearComponentCache does not drop them). So each reload links
-# the plugin under a path the shell has never seen. The directory name is
-# free; the plugin id comes from manifest.json.
-cmd_reload() {
-  [[ -n $(current_link) ]] || die "plugin is not installed; run: x-cast install"
-  local old
-  while IFS= read -r old; do rm "$old"; done < <(installed_links)
-  ln -s "$plugin_src" "$plugin_link.dev-$(date +%s%N)"
-}
-
-cmd_dev() {
-  command -v inotifywait >/dev/null || die "inotifywait not found (inotify-tools)"
-  cmd_reload
-  echo "watching $plugin_src; Ctrl+C to stop"
-  inotifywait -m -r -q -e close_write,create,delete,move --format '%w%f' "$plugin_src" |
-    while read -r path; do
-      echo "changed ${path#"$plugin_src"/}"
-      cmd_reload
-    done
-}
-
-# Hyprland on Omarchy is configured in Lua. Write our own file and require it
-# once from hyprland.lua; never edit Omarchy's files or the user's bindings.
-cmd_setup_hyprland() {
-  [[ -f $hypr_dir/hyprland.lua ]] || die "no $hypr_dir/hyprland.lua; this setup targets Lua-configured Hyprland (hyprctl version: $(hyprctl version 2>/dev/null | head -1))"
-
-  local conflicts
-  conflicts=$(grep -rnE '"ALT \+ SPACE"|ALT, ?SPACE' "$hypr_dir" "${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr" 2>/dev/null | grep -v "$hypr_dir/x-cast.lua" | grep -vE '^\S+:[0-9]+:\s*(--|#)')
-  if [[ -n $conflicts ]]; then
-    echo "Alt+Space is already bound:" >&2
-    echo "$conflicts" >&2
-    die "unbind it first, or edit $hypr_dir/x-cast.lua to use another key"
-  fi
-
-  cat >"$hypr_dir/x-cast.lua" <<'LUA'
--- Written by `x-cast setup hyprland`. Safe to edit; rerunning setup overwrites it.
--- Alt+Space reaches the plugin's global shortcut directly, so no process
--- starts per keypress. Omarchy's own menu stays on Super+Space.
-o.bind("ALT + SPACE", "x-cast launcher", hl.dsp.global("x-cast:toggle"))
-
--- To put x-cast on Super+Space instead of the Omarchy menu:
--- hl.unbind("SUPER + SPACE")
--- o.bind("SUPER + SPACE", "x-cast launcher", hl.dsp.global("x-cast:toggle"))
-LUA
-  echo "wrote $hypr_dir/x-cast.lua"
-
-  if ! grep -qE '^\s*require\("hypr\.x-cast"\)' "$hypr_dir/hyprland.lua"; then
-    printf '\n-- x-cast launcher bindings\nrequire("hypr.x-cast")\n' >>"$hypr_dir/hyprland.lua"
-    echo "added require(\"hypr.x-cast\") to $hypr_dir/hyprland.lua"
-  fi
-  hyprctl reload >/dev/null && echo "reloaded Hyprland; Alt+Space toggles x-cast"
+cmd_setup_i3() {
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/i3/config" bin="$HOME/.local/bin/x-cast"
+  [[ -f $cfg ]] || die "$cfg not found"
+  mkdir -p "$HOME/.local/bin" && ln -sfn "$self" "$bin"
+  grep -q 'x-cast toggle' "$cfg" && { echo "x-cast: $cfg already has an x-cast binding"; return; }
+  cp "$cfg" "$cfg.bak-before-x-cast"
+  sed -i -E 's|^(bindsym \$mod\+d .*)$|# \1|' "$cfg"
+  printf '\nbindsym $mod+d exec --no-startup-id %s toggle\nfor_window [class="^x-cast$"] floating enable, border none\n' "$bin" >> "$cfg"
+  echo "x-cast: bound \$mod+d in $cfg (backup: $cfg.bak-before-x-cast); reload i3 with \$mod+Shift+c"
 }
 
 cmd_doctor() {
@@ -178,19 +57,16 @@ cmd_doctor() {
     if "$@" >/dev/null 2>&1; then printf '  ok    %s\n' "$label"; else printf '  FAIL  %s\n' "$label"; bad=1; fi
   }
   echo "x-cast doctor"
-  check "omarchy-shell is installed" command -v omarchy-shell
-  check "omarchy-shell is running" omarchy-shell shell ping
-  check "socat is installed (fast shell IPC)" command -v socat
-  check "Hyprland socket is reachable" hyprctl version
-  check "plugin is linked into $plugins_dir" test -n "$(current_link)"
-  check "plugin is enabled" bash -c "omarchy plugin list --json 2>/dev/null | grep -q '\"id\":\"$PLUGIN_ID\"[^}]*\"enabled\":true'"
-  check "plugin answers IPC" bash -c "[[ \$(omarchy-shell $IPC_TARGET ping) == ok ]]"
-  check "backend answers system.healthPing" bash -c "omarchy-shell $IPC_TARGET call system.healthPing '{}' | grep -q '\"ok\":true'"
-  if [[ -f $hypr_dir/x-cast.lua ]]; then
-    printf '  ok    hotkey file %s\n' "$hypr_dir/x-cast.lua"
-  else
-    printf '  info  no hotkey yet; run: x-cast setup hyprland\n'
-  fi
+  check "X11 session (DISPLAY set)" test -n "${DISPLAY:-}"
+  check "python venv at $python" test -x "$python"
+  check "PySide6 and PyYAML import" "$python" -c "import PySide6, yaml"
+  check "nc (socket client)" command -v nc
+  check "xdg-open (web search rows)" command -v xdg-open
+  check "xclip (copy actions)" command -v xclip
+  check "notify-send (notices while hidden)" command -v notify-send
+  check "host answers on $sock" bash -c "[[ \$(printf 'ping\n' | nc -U -q0 '$sock') == ok ]]"
+  check "$config_dir/config.yaml exists" test -f "$config_dir/config.yaml"
+  check "$config_dir/theme.yaml exists" test -f "$config_dir/theme.yaml"
   return $bad
 }
 
@@ -199,17 +75,9 @@ case "${1:-}" in
   run) [[ -n ${2:-} ]] || die "usage: x-cast run <commandId>"; ipc run "$2" ;;
   call) [[ -n ${2:-} ]] || die "usage: x-cast call <method> [json]"; ipc call "$2" "${3:-}" ;;
   ping) ipc ping ;;
-  install) cmd_install ;;
-  uninstall) cmd_uninstall ;;
-  reload) cmd_reload ;;
-  dev) cmd_dev ;;
-  setup)
-    case "${2:-}" in
-      hyprland) cmd_setup_hyprland ;;
-      *) die "usage: x-cast setup hyprland" ;;
-    esac
-    ;;
+  host) exec "$python" "$repo/host/main.py" ;;
+  setup) [[ ${2:-} == i3 ]] || die "usage: x-cast setup i3"; cmd_setup_i3 ;;
   doctor) cmd_doctor ;;
-  -h|--help|help|"") usage ;;
-  *) usage >&2; exit 1 ;;
+  ""|-h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
 esac

@@ -1,5 +1,6 @@
-"""Desktop entries, icons and window helpers that Omarchy's shell provides to a plugin."""
+"""Desktop entries, icons and window placement for the X11 host."""
 import configparser
+import json
 import os
 import shlex
 import shutil
@@ -66,7 +67,7 @@ def scan():
 
 
 class AppLibrary(QObject):
-    """Same surface as Omarchy's shell.appLibrary: sortedEntries, launch, iconSource, appsChanged."""
+    """What Launcher.qml expects as shell.appLibrary: sortedEntries, launch, iconSource, appsChanged."""
     appsChanged = Signal()
 
     def __init__(self, parent=None):
@@ -168,6 +169,10 @@ class IconIndex:
                         best[stem] = ((99, 0, 0), os.path.join(pixmaps, f))
         self._best = {k: v[1] for k, v in best.items()}
 
+    def warm(self):
+        if not self._built:
+            self._build()
+
     def resolve(self, name):
         if not name:
             return ""
@@ -193,7 +198,7 @@ def init_icon_theme():
 
 
 class HostShell(QObject):
-    """What Launcher.qml expects as `shell`: an app library and summon/hide that decline."""
+    """What Launcher.qml gets as `shell`."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -202,19 +207,28 @@ class HostShell(QObject):
     @Property(QObject, constant=True)
     def appLibrary(self): return self._library
 
-    @Slot(str, str, result=bool)
-    def summon(self, _plugin_id, _payload): return False
 
-    @Slot(str, result=bool)
-    def hide(self, _plugin_id): return False
+def focused_output_screen():
+    """The screen showing i3's focused workspace, or None when i3-msg is unavailable."""
+    try:
+        out = subprocess.run(["i3-msg", "-t", "get_workspaces"], capture_output=True, text=True, timeout=1).stdout
+        name = next(w["output"] for w in json.loads(out) if w.get("focused"))
+    except (OSError, subprocess.SubprocessError, ValueError, StopIteration, KeyError):
+        return None
+    return next((s for s in QGuiApplication.screens() if s.name() == name), None)
 
 
 class Host(QObject):
     """Window placement and shaping that Wayland layer-shell does for free."""
 
-    @Slot(result="QVariant")
-    def activeScreenRect(self):
-        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+    @Slot(str, result="QVariant")
+    def activeScreenRect(self, mode):
+        screen = None
+        if mode == "primary-screen":
+            screen = QGuiApplication.primaryScreen()
+        elif mode == "active-screen":
+            screen = focused_output_screen()
+        screen = screen or QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         g = screen.geometry()
         return {"x": g.x(), "y": g.y(), "width": g.width(), "height": g.height()}
 

@@ -1,14 +1,11 @@
-"""The slice of Quickshell that plugin/ uses, for hosts that are not Quickshell (i3 on X11).
-
-Names and signatures follow Quickshell's QML API so plugin/*.qml runs unchanged.
-"""
+"""The slice of Quickshell's QML API that plugin/ uses, implemented on plain Qt for the X11 host."""
 import os
 import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import (Property, QFileSystemWatcher, QObject, QProcess, QTimer, Signal, Slot)
 import apps
-from PySide6.QtQml import QmlAttached, qmlRegisterSingletonInstance, qmlRegisterType
+from PySide6.QtQml import qmlRegisterSingletonInstance, qmlRegisterType
 
 
 class SplitParser(QObject):
@@ -237,36 +234,6 @@ class DesktopEntries(QObject):
     def applications(self): return self._applications
 
 
-class GlobalShortcut(QObject):
-    appidChanged = Signal()
-    nameChanged = Signal()
-    descriptionChanged = Signal()
-    pressed = Signal()
-    released = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._appid = self._name = self._description = ""
-
-    appid = Property(str, lambda s: s._appid, lambda s, v: setattr(s, "_appid", v), notify=appidChanged)
-    name = Property(str, lambda s: s._name, lambda s, v: setattr(s, "_name", v), notify=nameChanged)
-    description = Property(str, lambda s: s._description, lambda s, v: setattr(s, "_description", v),
-                           notify=descriptionChanged)
-
-
-class WlrLayershellAttached(QObject):
-    namespaceChanged = Signal()
-    namespace = Property(str, lambda s: getattr(s, "_ns", ""), lambda s, v: setattr(s, "_ns", v),
-                         notify=namespaceChanged)
-
-
-@QmlAttached(WlrLayershellAttached)
-class WlrLayershell(QObject):
-    @staticmethod
-    def qmlAttachedProperties(*args):
-        return WlrLayershellAttached(args[-1])
-
-
 _singletons = []
 
 
@@ -279,5 +246,3 @@ def register():
     qmlRegisterType(Process, "Quickshell.Io", 1, 0, "Process")
     qmlRegisterType(FileView, "Quickshell.Io", 1, 0, "FileView")
     qmlRegisterSingletonInstance(FileViewError, "Quickshell.Io", 1, 0, "FileViewError", errors)
-    qmlRegisterType(GlobalShortcut, "Quickshell.Hyprland", 1, 0, "GlobalShortcut")
-    qmlRegisterType(WlrLayershell, "Quickshell.Wayland", 1, 0, "WlrLayershell")

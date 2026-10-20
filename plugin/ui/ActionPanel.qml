@@ -92,7 +92,7 @@ Rectangle {
           text: modelData.icon || ""
           color: panel.look.foreground
           opacity: 0.75
-          font.family: modelData.icon === "" ? "omarchy" : panel.look.fontFamily
+          font.family: panel.look.iconFamily
           font.pixelSize: panel.px(13)
         }
 

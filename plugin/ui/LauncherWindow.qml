@@ -1,16 +1,14 @@
 import QtQuick
 import Quickshell
-import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 
 // Launcher surface (SPEC §5.1, §10.2): 750×475 at uiZoom 1, 66 px search
 // header, 42 px footer, centred horizontally about a quarter down the
-// screen, coloured by the active Omarchy theme's [menu] tokens.
+// screen, coloured by theme.yaml.
 //
-// Views form a navigation stack: root search, a pushed Omarchy submenu, or
-// the alias editor. Each view keeps its own query.
+// Views form a navigation stack: root search or the alias editor. Each view keeps its own query.
 OverlayWindow {
   id: window
 
@@ -18,8 +16,6 @@ OverlayWindow {
   property var appLibrary: null
 
   signal dismissRequested()
-
-  WlrLayershell.namespace: "x-cast"
 
   // ------------------------------------------------------------ settings
   readonly property var general: {
@@ -35,7 +31,8 @@ OverlayWindow {
     foreground: Commons.Color.menu.text,
     accent: Commons.Color.menu.selectedText,
     selectedBackground: Commons.Color.menu.selectedBackground,
-    fontFamily: Style.font.menuFamily
+    fontFamily: Style.font.menuFamily,
+    iconFamily: Style.font.iconFamily
   })
   readonly property var borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
 
@@ -53,7 +50,7 @@ OverlayWindow {
   readonly property bool atRoot: window.stack.length === 1
   readonly property bool compact: window.general.windowMode === "compact" && window.atRoot && !window.query
   readonly property string placeholder: window.view.kind === "alias" ? "Type an alias, then press ↵"
-    : (window.view.kind === "menu" ? "Search " + window.view.title + "…" : "Search for apps and commands…")
+    : "Search for apps…"
 
   readonly property int cardWidth: Math.min(px(750), width - Style.gapsOut * 2)
   readonly property int fullHeight: Math.min(px(475), height - Style.gapsOut * 2)
@@ -152,7 +149,6 @@ OverlayWindow {
       title: String(c.title || ""),
       subtitle: String(c.subtitle || ""),
       glyph: String(c.glyph || ""),
-      glyphFont: String(c.glyphFont || ""),
       iconName: String(c.iconName || ""),
       typeLabel: String(c.typeLabel || ""),
       alias: String(c.alias || ""),
@@ -279,9 +275,9 @@ OverlayWindow {
     onTriggered: window.toast = null
   }
 
-  // While hidden, a toast becomes a HUD: Omarchy's OSD pill. [D]
+  // While hidden, a toast becomes a desktop notification. [D]
   function hud(text) {
-    Quickshell.execDetached(["omarchy-shell", "osd", "show", JSON.stringify({ icon: "", message: String(text), duration: 1500 })])
+    Quickshell.execDetached(["notify-send", "-t", "1500", "-a", "x-cast", String(text)])
   }
 
   // ----------------------------------------------------------- the query
@@ -439,7 +435,7 @@ OverlayWindow {
       anchors.rightMargin: card.borderRight
       height: window.headerHeight
 
-      // Omarchy logo at the root, a back arrow inside pushed views.
+      // Search glyph at the root, a back arrow inside pushed views.
       Item {
         id: lead
         width: window.px(28)
@@ -451,8 +447,8 @@ OverlayWindow {
         Text {
           anchors.centerIn: parent
           textFormat: Text.PlainText
-          text: window.atRoot ? "" : ""
-          font.family: window.atRoot ? "omarchy" : window.look.fontFamily
+          text: window.atRoot ? "" : ""
+          font.family: window.look.iconFamily
           font.pixelSize: window.atRoot ? window.px(18) : window.px(15)
           color: window.atRoot ? window.look.accent : window.look.foreground
           opacity: window.atRoot ? 1 : 0.7
@@ -497,32 +493,6 @@ OverlayWindow {
           PauseAnimation { duration: 530 }
           NumberAnimation { to: 0; duration: 0 }
           PauseAnimation { duration: 530 }
-        }
-      }
-
-      // 2 px loading bar under the header (SPEC §10.2).
-      Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: Style.spacing.hairline
-        color: Util.alpha(window.look.foreground, 0.12)
-        visible: !window.compact
-
-        Rectangle {
-          id: loader
-          visible: window.backend.loading && window.shown
-          height: Math.max(2, Style.space(2))
-          width: parent.width / 4
-          anchors.verticalCenter: parent.verticalCenter
-          color: window.look.accent
-          NumberAnimation on x {
-            running: loader.visible
-            loops: Animation.Infinite
-            from: -loader.width
-            to: header.width
-            duration: 900
-          }
         }
       }
     }
@@ -571,7 +541,7 @@ OverlayWindow {
           textFormat: Text.PlainText
           text: window.view.kind === "alias" ? "" : ""
           color: window.look.accent
-          font.family: window.view.kind === "alias" ? window.look.fontFamily : "omarchy"
+          font.family: window.look.iconFamily
           font.pixelSize: window.px(28)
         }
         Text {
@@ -628,9 +598,9 @@ OverlayWindow {
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           text: window.toast ? (window.toast.style === "failure" ? "" : "") : ""
-          font.family: window.toast ? window.look.fontFamily : "omarchy"
+          font.family: window.look.iconFamily
           font.pixelSize: window.toast ? window.px(12) : window.px(11)
-          color: window.toast && window.toast.style === "failure" ? "#e06c75" : window.look.accent
+          color: window.toast && window.toast.style === "failure" ? Commons.Color.menu.error : window.look.accent
         }
         Text {
           anchors.verticalCenter: parent.verticalCenter

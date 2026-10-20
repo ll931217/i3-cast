@@ -14,7 +14,6 @@ Item {
   required property string title
   required property string subtitle
   required property string glyph
-  required property string glyphFont
   required property string iconName
   required property string typeLabel
   required property string alias
@@ -82,8 +81,8 @@ Item {
         textFormat: Text.PlainText
         text: row.glyph
         color: row.selected ? row.look.accent : row.look.foreground
-        font.family: row.glyphFont || row.look.fontFamily
-        font.pixelSize: row.glyphFont === "omarchy" ? row.px(14) : row.px(17)
+        font.family: row.look.iconFamily
+        font.pixelSize: row.px(15)
       }
     }
 

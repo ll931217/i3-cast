@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import OmaHost
 import qs.Commons
 import "core/Rpc.js" as Rpc
 import "core/Paths.js" as Paths
@@ -8,7 +9,6 @@ import "core/Log.js" as Log
 import "core/Schema.js" as Schema
 import "core/Ranker.js" as Ranker
 import "core/Frecency.js" as Frecency
-import "core/OmarchyMenu.js" as OmarchyMenu
 import "core/RootSearch.js" as RootSearch
 import "services"
 
@@ -20,12 +20,10 @@ Item {
 
   readonly property string version: "0.1.0"
   readonly property var paths: Paths.resolve(function(name) { return Quickshell.env(name) })
-  readonly property string desktop: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") ? "hyprland" : "unknown"
+  readonly property string desktop: Quickshell.env("XDG_CURRENT_DESKTOP") || "unknown"
 
-  // Omarchy's shared app library (shell.appLibrary), injected by Launcher.qml.
+  // Desktop entries (sortedEntries, launch, iconSource), injected by Launcher.qml.
   property var appLibrary: null
-  // Asks the shell to summon a plugin in-process; injected by Launcher.qml.
-  property var summon: null
 
   property var config: Schema.withConfigDefaults(null)
   property bool directoriesReady: false
@@ -33,13 +31,12 @@ Item {
 
   readonly property var registry: Rpc.createRegistry()
   readonly property double startedAt: Date.now()
-  readonly property var deps: ({ Ranker: Ranker, Frecency: Frecency, OmarchyMenu: OmarchyMenu })
+  readonly property var deps: ({ Ranker: Ranker, Frecency: Frecency })
 
   // Every root-search candidate, rebuilt when a provider changes.
   property var candidates: []
   property var candidatesById: ({})
   property int candidatesRevision: 0
-  readonly property bool loading: menuSource.loading
 
   signal notification(string method, var data)
 
@@ -69,17 +66,13 @@ Item {
   // ------------------------------------------------------------ candidates
 
   function appEntries() {
-    if (backend.appLibrary) return backend.appLibrary.sortedEntries("").map(function(row) { return row.entry })
-    // Outside a menu-kind load the shell hands us no library; read entries directly.
-    return (DesktopEntries.applications.values || []).filter(function(e) { return !e.noDisplay })
+    return backend.appLibrary ? backend.appLibrary.sortedEntries("").map(function(row) { return row.entry }) : []
   }
 
   function rebuildCandidates() {
     var next = []
     var apps = backend.appEntries()
     for (var i = 0; i < apps.length; i++) if (apps[i] && apps[i].id) next.push(RootSearch.appCandidate(apps[i]))
-    next = next.concat(RootSearch.menuCandidates(menuSource.tree, menuSource.guards, menuSource.providerItems, backend.deps))
-    for (var b = 0; b < RootSearch.BUILTINS.length; b++) next.push(RootSearch.builtinCandidate(RootSearch.BUILTINS[b]))
     var byId = ({})
     for (var j = 0; j < next.length; j++) byId[next[j].id] = next[j]
     backend.candidates = next
@@ -93,12 +86,18 @@ Item {
     onTriggered: backend.rebuildCandidates()
   }
 
+  // config.yaml `general` wins over what the settings document stored.
+  function effectiveGeneral() {
+    return Object.assign({}, settingsStore.doc.general, backend.config.general)
+  }
+
   function searchContext() {
     return {
       commands: settingsStore.loaded ? settingsStore.doc.commands : ({}),
       frecency: frecencyStore.loaded ? frecencyStore.doc.items : ({}),
       nowMs: Date.now(),
-      sensitivity: settingsStore.loaded ? settingsStore.doc.general.rootSearchSensitivity : "medium"
+      sensitivity: settingsStore.loaded ? backend.effectiveGeneral().rootSearchSensitivity : "medium",
+      fallbacks: backend.fallbacks()
     }
   }
 
@@ -109,18 +108,14 @@ Item {
 
   // ------------------------------------------------------------- execution
 
-  // The shell lets a third-party plugin summon only itself in-process, so
-  // other plugins (omarchy.menu, omarchy.clipboard) go through its CLI.
-  function summonPlugin(id, payload) {
-    if (backend.summon && backend.summon(id, payload)) return
-    Quickshell.execDetached(["omarchy-shell", "shell", "summon", id, payload || "{}"])
+  function openUrl(url) { Util.execArgv(["xdg-open", url]) }
+
+  function copyText(text) {
+    Util.execArgv(["sh", "-c", 'printf %s "$1" | xclip -selection clipboard', "x-cast", text])
   }
 
-  function runShell(command) {
-    var summon = OmarchyMenu.summonAction(command)
-    if (summon) backend.summonPlugin(summon.id, summon.payload)
-    else Util.execDetached(command)
-  }
+  // Search engines for "Use … with…": config.yaml `fallbacks`, else the built-in list.
+  function fallbacks() { return backend.config.fallbacks || RootSearch.FALLBACKS }
 
   function recordVisit(id, query) {
     if (!frecencyStore.loaded) return
@@ -142,15 +137,6 @@ Item {
     backend.emit("settings.commandSettingsChanged", { commandId: id })
   }
 
-  // The parent menu an action lives in, for "Open in Omarchy Menu".
-  function omarchyRouteFor(candidate) {
-    if (candidate.kind === "omarchy-action") {
-      var item = menuSource.tree.items[candidate.menuId]
-      return item && item.parent ? item.parent : "root"
-    }
-    return candidate.kind === "omarchy-link" ? candidate.target : candidate.menuId
-  }
-
   // One action on one row. Returns what the UI should do next:
   // { close, push: {view}, toast: {style, title}, hud: "text" }.
   function performAction(data) {
@@ -164,40 +150,18 @@ Item {
       switch (candidate.kind) {
         case "app":
           backend.recordVisit(id, query)
-          if (backend.appLibrary) backend.appLibrary.launch(candidate.appId, candidate.title)
-          else Util.execArgv(["uwsm-app", "--", "gtk-launch", candidate.appId + ".desktop"])
-          return { close: true }
-        case "omarchy-action":
-          if (candidate.disabled) return { toast: { style: "failure", title: candidate.title + " is already set up" } }
-          backend.recordVisit(id, query)
-          backend.runShell(candidate.action)
-          return { close: true }
-        case "omarchy-menu":
-          backend.recordVisit(id, query)
-          return { push: { kind: "menu", menuId: candidate.menuId, title: candidate.title } }
-        case "omarchy-link":
-          backend.recordVisit(id, query)
-          var target = menuSource.tree.items[candidate.target]
-          if (!target) return { toast: { style: "failure", title: "Menu " + candidate.target + " not found" } }
-          return { push: { kind: "menu", menuId: target.id, title: target.label } }
-        case "builtin":
-          backend.recordVisit(id, query)
-          if (candidate.run.summon) backend.summonPlugin(candidate.run.summon, candidate.run.payload || "{}")
+          backend.appLibrary.launch(candidate.appId, candidate.title)
           return { close: true }
         case "fallback":
-          Util.execArgv(["omarchy-launch-browser", RootSearch.fallbackUrl(candidate, query)])
+          backend.openUrl(RootSearch.fallbackUrl(candidate, query))
           return { close: true }
       }
       throw new Error("Cannot open " + id)
     }
 
     switch (action) {
-      case "open-in-omarchy-menu":
-        backend.summonPlugin("omarchy.menu", JSON.stringify({ menu: backend.omarchyRouteFor(candidate) }))
-        return { close: true }
-      case "copy-command":
       case "copy-id":
-        Util.execArgv(["wl-copy", "--", action === "copy-id" ? candidate.appId + ".desktop" : candidate.action])
+        backend.copyText(candidate.appId + ".desktop")
         return { close: true, hud: "Copied to Clipboard" }
       case "favorite-add":
       case "favorite-remove":
@@ -265,7 +229,7 @@ Item {
     Rpc.register(backend.registry, "settings", {
       getGeneralSettings: function() {
         if (!settingsStore.loaded) throw new Error("settings not loaded")
-        return settingsStore.doc.general
+        return backend.effectiveGeneral()
       },
       // Partial update; only known keys with a matching type are accepted.
       updateGeneralSettings: function(data) {
@@ -305,14 +269,10 @@ Item {
     })
 
     Rpc.register(backend.registry, "rootSearch", {
-      // {query, view?: {kind:"menu", menuId}} -> sections of plain rows.
+      // {query} -> sections of plain rows.
       search: function(data) {
         var query = String(data && data.query || "")
-        var view = data && data.view
-        var ctx = backend.searchContext()
-        var sections = view && view.kind === "menu"
-          ? RootSearch.submenuSections(backend.candidates, view.menuId, query, ctx, backend.deps)
-          : RootSearch.rootSections(backend.candidates, query, ctx, backend.deps)
+        var sections = RootSearch.rootSections(backend.candidates, query, backend.searchContext(), backend.deps)
         return sections.map(function(s) {
           return { id: s.id, title: s.title, rows: s.rows.map(function(r) { return r.candidate }) }
         })
@@ -320,7 +280,7 @@ Item {
       getActions: function(data) {
         var candidate = backend.decorated(String(data && data.id || ""))
         if (!candidate) {
-          var fallback = RootSearch.FALLBACKS.filter(function(f) { return f.id === data.id })[0]
+          var fallback = backend.fallbacks().filter(function(f) { return f.id === data.id })[0]
           if (!fallback) throw new Error("Unknown command " + (data && data.id))
           return RootSearch.actionsFor({ kind: "fallback", title: fallback.title })
         }
@@ -328,9 +288,9 @@ Item {
       },
       performAction: function(data) {
         // Fallbacks are rows, not stored candidates.
-        var fallback = RootSearch.FALLBACKS.filter(function(f) { return f.id === (data && data.id) })[0]
+        var fallback = backend.fallbacks().filter(function(f) { return f.id === (data && data.id) })[0]
         if (fallback) {
-          Util.execArgv(["omarchy-launch-browser", RootSearch.fallbackUrl(fallback, data.query)])
+          backend.openUrl(RootSearch.fallbackUrl(fallback, data.query))
           return { close: true }
         }
         return backend.performAction(data)
@@ -348,6 +308,7 @@ Item {
   }
 
   Component.onCompleted: {
+    backend.config = Schema.withConfigDefaults(HostConfig.config)
     registerServices()
     mkdirs.running = true
   }
@@ -360,17 +321,7 @@ Item {
     function onAppsChanged() { rebuildTimer.restart() }
   }
 
-  Connections {
-    target: backend.appLibrary ? null : DesktopEntries.applications
-    ignoreUnknownSignals: true
-    function onValuesChanged() { rebuildTimer.restart() }
-  }
-
-  // Guards and providers describe live system state: refresh them each open.
   Component.onDestruction: { settingsStore.flush(); frecencyStore.flush() }
-  onNotification: function(method, data) {
-    if (method === "window.visibilityChanged" && data && data.visible) menuSource.refresh()
-  }
 
   // ------------------------------------------------------------ persistence
 
@@ -381,12 +332,6 @@ Item {
       if (exitCode !== 0) backend.log("error", "paths", "could not create data directories", { exitCode: exitCode })
       backend.directoriesReady = true
     }
-  }
-
-  OmarchyMenuSource {
-    id: menuSource
-    onRevisionChanged: rebuildTimer.restart()
-    onMessage: function(level, text, metadata) { backend.log(level, "omarchy-menu", text, metadata) }
   }
 
   JsonStore {
@@ -411,20 +356,12 @@ Item {
   Connections { target: settingsStore; function onChanged() { backend.storeRevision++ } }
   Connections { target: frecencyStore; function onChanged() { backend.storeRevision++ } }
 
-  // config.json is optional and hand-edited; it hot-reloads on save.
-  FileView {
-    path: backend.directoriesReady ? backend.paths.configFile : ""
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try {
-        backend.config = Schema.withConfigDefaults(JSON.parse(text()))
-      } catch (e) {
-        backend.config = Schema.withConfigDefaults(null)
-        backend.log("warning", "config", "ignoring unreadable " + path + ": " + e)
-      }
+  // config.yaml is parsed by the host, which re-sends it on every save.
+  Connections {
+    target: HostConfig
+    function onConfigChanged() {
+      backend.config = Schema.withConfigDefaults(HostConfig.config)
+      backend.storeRevision++
     }
-    onLoadFailed: backend.config = Schema.withConfigDefaults(null)
   }
 }

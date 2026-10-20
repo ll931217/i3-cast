@@ -14,6 +14,7 @@ from PySide6.QtQuick import QQuickView
 
 import apps
 import qsshim
+import userconfig
 
 HERE = Path(__file__).resolve().parent
 
@@ -53,7 +54,8 @@ def serve(registry, path):
                 return
             line = bytes(conn.readLine()).decode("utf-8", "replace").strip()
             fn, _, rest = line.partition(" ")
-            args = rest.split(" ", 1) if fn in ("call",) else ([rest] if rest else [])
+            # Typed ShellIpc parameters turn a missing argument into the string "undefined", so pad.
+            args = (rest.split(" ", 1) + [""])[:2] if fn == "call" else ([rest] if rest else [])
             conn.write((registry.call("x-cast", fn, args) + "\n").encode())
             conn.disconnectFromServer()
 
@@ -71,10 +73,13 @@ def main():
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     apps.init_icon_theme()
+    apps.icons.warm()
     qsshim.register()
     registry = IpcRegistry()
+    user = userconfig.HostConfig()
     shell = apps.HostShell()
     qmlRegisterSingletonInstance(IpcRegistry, "OmaHost", 1, 0, "IpcRegistry", registry)
+    qmlRegisterSingletonInstance(userconfig.HostConfig, "OmaHost", 1, 0, "HostConfig", user)
     qmlRegisterSingletonInstance(apps.HostShell, "OmaHost", 1, 0, "HostShell", shell)
     host = apps.Host()
     qmlRegisterSingletonInstance(apps.Host, "OmaHost", 1, 0, "Host", host)

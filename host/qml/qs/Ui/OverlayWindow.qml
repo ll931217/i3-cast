@@ -35,7 +35,8 @@ Window {
   }
 
   function place() {
-    var s = Host.activeScreenRect()
+    var general = overlay["general"]
+    var s = Host.activeScreenRect(general && general.windowPresentationMode ? general.windowPresentationMode : "mouse-screen")
     overlay.x = s.x + Math.round((s.width - overlay.width) / 2)
     overlay.y = s.y + Math.round(s.height * 0.2)
   }
