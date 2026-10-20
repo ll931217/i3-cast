@@ -12,10 +12,10 @@ function shouldLog(level, threshold) {
   return levelIndex(level) >= levelIndex(threshold)
 }
 
-// "[oma-cast] [info] [system] message {json}". Metadata is optional and
+// "[x-cast] [info] [system] message {json}". Metadata is optional and
 // serialized on one line so a log stays grep-able.
 function format(level, category, message, metadata) {
-  var line = "[oma-cast] [" + LEVELS[levelIndex(level)] + "]"
+  var line = "[x-cast] [" + LEVELS[levelIndex(level)] + "]"
   if (category) line += " [" + category + "]"
   line += " " + String(message)
   if (metadata !== undefined && metadata !== null) {

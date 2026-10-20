@@ -4,14 +4,14 @@ import Quickshell.Hyprland
 import qs.Commons
 import "ui"
 
-// oma-cast: a Raycast-style launcher as an Omarchy shell plugin.
+// x-cast: a Raycast-style launcher as an Omarchy shell plugin.
 //
 // omarchy-shell loads this once (keepLoaded) and calls open(payloadJson) on
 // summon and close() on hide. Everything else reaches it three ways, all of
 // which end in toggle()/show()/hide():
-//   - the Hyprland global shortcut oma-cast:toggle (no process per keypress)
-//   - `oma-cast toggle` -> omarchy-shell oma-cast toggle (shell socket)
-//   - `omarchy-shell shell toggle typecraft.oma-cast`
+//   - the Hyprland global shortcut x-cast:toggle (no process per keypress)
+//   - `x-cast toggle` -> omarchy-shell x-cast toggle (shell socket)
+//   - `omarchy-shell shell toggle typecraft.x-cast`
 Item {
   id: root
 
@@ -20,7 +20,7 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string pluginId: (root.manifest && root.manifest.id) || "typecraft.oma-cast"
+  readonly property string pluginId: (root.manifest && root.manifest.id) || "typecraft.x-cast"
 
   property bool opened: false
   property double openedAt: 0
@@ -68,7 +68,7 @@ Item {
     else root.show()
   }
 
-  // Open a command directly (`oma-cast run <id>`, later per-command
+  // Open a command directly (`x-cast run <id>`, later per-command
   // hotkeys). It counts as a launch for frecency, like Raycast's hotkeys.
   function run(commandId) {
     var r = backend.callSync("rootSearch.performAction", { id: commandId, action: "open", query: "" })
@@ -99,17 +99,17 @@ Item {
     onDismissRequested: root.hide()
   }
 
-  // Bound as hl.dsp.global("oma-cast:toggle"); see `oma-cast setup hyprland`.
+  // Bound as hl.dsp.global("x-cast:toggle"); see `x-cast setup hyprland`.
   // The name is fixed: a GlobalShortcut cannot be renamed once registered.
   GlobalShortcut {
-    appid: "oma-cast"
+    appid: "x-cast"
     name: "toggle"
-    description: "Toggle oma-cast"
+    description: "Toggle x-cast"
     onPressed: root.toggle()
   }
 
   ShellIpc {
-    target: "oma-cast"
+    target: "x-cast"
 
     function toggle(): string {
       root.toggle()
@@ -140,7 +140,7 @@ Item {
       return JSON.stringify(root.run(commandId))
     }
 
-    // Dispatch any backend method: oma-cast call system.healthPing '{}'.
+    // Dispatch any backend method: x-cast call system.healthPing '{}'.
     function call(method: string, dataJson: string): string {
       var data = null
       if (dataJson && dataJson.length > 0) {

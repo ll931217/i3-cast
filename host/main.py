@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""oma-cast host for X11 window managers (i3): runs plugin/Launcher.qml under plain Qt."""
+"""x-cast host for X11 window managers (i3): runs plugin/Launcher.qml under plain Qt."""
 import json
 import os
 import signal
@@ -43,7 +43,7 @@ def serve(registry, path):
     QLocalServer.removeServer(path)
     server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
     if not server.listen(path):
-        sys.exit("oma-cast: cannot listen on %s: %s" % (path, server.errorString()))
+        sys.exit("x-cast: cannot listen on %s: %s" % (path, server.errorString()))
 
     def on_connection():
         conn = server.nextPendingConnection()
@@ -54,7 +54,7 @@ def serve(registry, path):
             line = bytes(conn.readLine()).decode("utf-8", "replace").strip()
             fn, _, rest = line.partition(" ")
             args = rest.split(" ", 1) if fn in ("call",) else ([rest] if rest else [])
-            conn.write((registry.call("oma-cast", fn, args) + "\n").encode())
+            conn.write((registry.call("x-cast", fn, args) + "\n").encode())
             conn.disconnectFromServer()
 
         conn.readyRead.connect(on_ready)
@@ -65,8 +65,8 @@ def serve(registry, path):
 
 def main():
     app = QGuiApplication(sys.argv)
-    app.setApplicationName("oma-cast")
-    app.setDesktopFileName("oma-cast")
+    app.setApplicationName("x-cast")
+    app.setDesktopFileName("x-cast")
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
@@ -89,7 +89,7 @@ def main():
         sys.exit(1)
 
     runtime = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
-    server = serve(registry, os.path.join(runtime, "oma-cast.sock"))
+    server = serve(registry, os.path.join(runtime, "x-cast.sock"))
     sys.exit(app.exec())
 
 

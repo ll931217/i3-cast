@@ -1,7 +1,7 @@
 // XDG locations for the clone (SPEC §6.3), from an environment lookup
 // function so QML (Quickshell.env) and tests (a plain object) share it.
 
-var APP = "oma-cast"
+var APP = "x-cast"
 
 function xdg(env, name, homeFallback) {
   var value = String(env(name) || "")

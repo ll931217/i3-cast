@@ -1,5 +1,5 @@
 // Persisted documents and their migrations. Each entry is one JSON file
-// under $XDG_DATA_HOME/oma-cast/db/. Add a migration to the end of a list;
+// under $XDG_DATA_HOME/x-cast/db/. Add a migration to the end of a list;
 // never edit or reorder one that has shipped.
 
 // General settings, using Raycast's key names and defaults
@@ -57,7 +57,7 @@ var documents = {
   frecency: { file: "frecency.json", migrations: frecencyMigrations }
 }
 
-// Host flags in $XDG_CONFIG_HOME/oma-cast/config.json: user-editable and
+// Host flags in $XDG_CONFIG_HOME/x-cast/config.json: user-editable and
 // non-secret (SPEC §6.3). Not migrated; unknown keys are kept and ignored,
 // missing ones fall back to these defaults.
 var configDefaults = {

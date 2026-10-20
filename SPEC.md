@@ -73,29 +73,29 @@ Consequences for Linux:
 
 ### 2.0 Quickshell build (current) [D, 2026-10-19]
 
-**This supersedes the Tauri + Node design below for Omarchy.** Omarchy's desktop (bar, menus, launcher, notifications, lock screen) runs in one long-lived Quickshell process, `omarchy-shell`, whose features are plugins. oma-cast is one more plugin there, built the way Omarchy builds its own menu and emoji picker. The reasons:
+**This supersedes the Tauri + Node design below for Omarchy.** Omarchy's desktop (bar, menus, launcher, notifications, lock screen) runs in one long-lived Quickshell process, `omarchy-shell`, whose features are plugins. x-cast is one more plugin there, built the way Omarchy builds its own menu and emoji picker. The reasons:
 - **No external dependencies.** No Tauri, WebKitGTK, Node runtime, npm packages or native SQLite modules. It needs only what Omarchy already ships: Quickshell, Qt, bash, socat and Hyprland.
 - **Native look.** The plugin reads the active Omarchy theme's `[menu]` tokens (`qs.Commons.Color`, `Style`), so `omarchy theme set` restyles it live with no theme parser.
 - **Speed.** The shell process is always warm. A hotkey reaches the plugin as a Hyprland global shortcut with no process spawn, and the CLI goes through the shell's socket (about 5 ms).
 
 ```
 omarchy-shell (Quickshell, one process)
- └─ plugin typecraft.oma-cast   (~/.config/omarchy/plugins/<link> → repo/plugin)
-     ├─ Launcher.qml        lifecycle open()/close(), ShellIpc target "oma-cast", GlobalShortcut oma-cast:toggle
-     ├─ ui/                 launcher surface on Omarchy's OverlayWindow (wlr-layer-shell, namespace "oma-cast")
+ └─ plugin typecraft.x-cast   (~/.config/omarchy/plugins/<link> → repo/plugin)
+     ├─ Launcher.qml        lifecycle open()/close(), ShellIpc target "x-cast", GlobalShortcut x-cast:toggle
+     ├─ ui/                 launcher surface on Omarchy's OverlayWindow (wlr-layer-shell, namespace "x-cast")
      ├─ Backend.qml         the "backend": paths, config.json, stores, method registry
      ├─ services/           QML services with I/O (JsonStore = FileView + migrations; later clipboard, apps…)
      └─ core/*.js           pure logic, no Qt: Rpc, Paths, Migrate, Log, Schema. Unit-tested with `node --test`
-bin/oma-cast                bash CLI → omarchy-shell oma-cast <fn> (socket), plus install/reload/doctor/setup
+bin/x-cast                bash CLI → omarchy-shell x-cast <fn> (socket), plus install/reload/doctor/setup
 ```
 
 How the rest of this spec maps onto it:
-- **§3 IPC.** There is no wire protocol between UI and backend; both live in one QML engine. The *method surface* stays: services register `namespace.method` handlers in one registry (`core/Rpc.js`), using Raycast's names (§3.4). `call()` returns a Promise and `callSync()` returns `{ok,data|error}`. Notifications (`window.visibilityChanged`, `settings.generalSettingsChanged`) go through `subscribe()`/`emit()`. External callers use `ShellIpc` (`oma-cast call <method> <json>`). The NDJSON host↔backend contract and supervisor (§3.3) are **deferred to Phase 5**: only Raycast extensions need Node, and they will run as a supervised child `Process` that speaks §3.3/§9.2.
+- **§3 IPC.** There is no wire protocol between UI and backend; both live in one QML engine. The *method surface* stays: services register `namespace.method` handlers in one registry (`core/Rpc.js`), using Raycast's names (§3.4). `call()` returns a Promise and `callSync()` returns `{ok,data|error}`. Notifications (`window.visibilityChanged`, `settings.generalSettingsChanged`) go through `subscribe()`/`emit()`. External callers use `ShellIpc` (`x-cast call <method> <json>`). The NDJSON host↔backend contract and supervisor (§3.3) are **deferred to Phase 5**: only Raycast extensions need Node, and they will run as a supervised child `Process` that speaks §3.3/§9.2.
 - **§4 platform.** Omarchy = Hyprland, so Phase 0 targets Hyprland only. Its config is **Lua** (`hyprland.lua`, `o.bind(...)`, `hl.dsp.global(...)`), not `.conf`.
 - **§5.1 window.** It uses Omarchy's `OverlayWindow`: a fullscreen transparent layer surface with exclusive keyboard focus, and the 750×475 card drawn inside it. Clicking outside the card counts as focus loss. The surface is mapped fresh on every open, which is how Omarchy avoids stale surfaces when monitors change.
-- **§6 data.** Persisted state is one versioned JSON document per store under `$XDG_DATA_HOME/oma-cast/db/` (`core/Migrate.js`: numbered migrations, history, atomic writes, never overwrite an unreadable or newer file). There is **no encryption at rest** and no libsecret key: Qt's FileView has no cipher, and full-disk encryption is the Omarchy default. If a store outgrows JSON (clipboard history, file index), revisit with Qt's built-in `QtQuick.LocalStorage` (SQLite) before adding a native dependency.
+- **§6 data.** Persisted state is one versioned JSON document per store under `$XDG_DATA_HOME/x-cast/db/` (`core/Migrate.js`: numbered migrations, history, atomic writes, never overwrite an unreadable or newer file). There is **no encryption at rest** and no libsecret key: Qt's FileView has no cipher, and full-disk encryption is the Omarchy default. If a store outgrows JSON (clipboard history, file index), revisit with Qt's built-in `QtQuick.LocalStorage` (SQLite) before adding a native dependency.
 - **§10 frontend.** QML instead of React, with themes from Omarchy's tokens. The 8 Raycast themes (§10.4) become optional palettes over the same tokens.
-- **Logging** goes to the shell's log (`qs log -n -p "$OMARCHY_PATH/shell"`, lines prefixed `[oma-cast]`), with the level from `config.json`. There are no separate log files.
+- **Logging** goes to the shell's log (`qs log -n -p "$OMARCHY_PATH/shell"`, lines prefixed `[x-cast]`), with the level from `config.json`. There are no separate log files.
 
 The original Tauri design follows, kept for reference and for non-Omarchy targets.
 
@@ -137,7 +137,7 @@ Why this shape:
 - **A Node backend is unavoidable**: Raycast extensions are Node/React programs. Putting the rest of the business logic there too mirrors Raycast and keeps one language for the services.
 - Write the host in Rust, not Node, for anything that needs Wayland protocols, uinput/evdev, D-Bus signals or low latency.
 
-**Working name:** `<app>` throughout. Pick one, e.g. `oma-cast`. Use app id `dev.<you>.<App>` and binary `<app>`.
+**Working name:** `<app>` throughout. Pick one, e.g. `x-cast`. Use app id `dev.<you>.<App>` and binary `<app>`.
 
 ---
 
@@ -741,11 +741,11 @@ Repo layout [D]:
 ```
 
 ### Phase 0: Skeleton and IPC (Quickshell build, §2.0) [D]
-- Omarchy shell plugin `typecraft.oma-cast` (`plugin/`, kind `menu` so the shell hands it the shared app library, `keepLoaded`). `bin/oma-cast install` links it into `~/.config/omarchy/plugins/` and enables it.
-- Launcher surface (750×475, 66 header, 42 footer) on the active Omarchy theme. It starts hidden and is toggled by `oma-cast toggle`, `omarchy-shell oma-cast toggle` or the global shortcut `oma-cast:toggle` (`oma-cast setup hyprland` binds Alt+Space).
+- Omarchy shell plugin `typecraft.x-cast` (`plugin/`, kind `menu` so the shell hands it the shared app library, `keepLoaded`). `bin/x-cast install` links it into `~/.config/omarchy/plugins/` and enables it.
+- Launcher surface (750×475, 66 header, 42 footer) on the active Omarchy theme. It starts hidden and is toggled by `x-cast toggle`, `omarchy-shell x-cast toggle` or the global shortcut `x-cast:toggle` (`x-cast setup hyprland` binds Alt+Space).
 - In-process backend: method registry with Raycast names, `system.healthPing`, `system.healthDatabase`, `system.info`, `system.getPaths`, `settings.getGeneralSettings` / `updateGeneralSettings`, and notifications. The footer shows a live `system.healthPing` round trip.
 - XDG paths (§6.3), `config.json` (hot reload), logging to the shell log, and versioned JSON stores with a migrations framework.
-- **Accept:** `oma-cast toggle` shows and hides in under 100 ms warm, measured from the CLI call to Hyprland's `openlayer`/`closelayer` event (`tests/smoke.sh`). A backend error or an unreadable store never takes the launcher down: calls answer `{ok:false,error}`, and the store goes read-only without overwriting the file, then recovers when the file is fixed. `node --test tests/` covers the registry, paths, migrations and logging.
+- **Accept:** `x-cast toggle` shows and hides in under 100 ms warm, measured from the CLI call to Hyprland's `openlayer`/`closelayer` event (`tests/smoke.sh`). A backend error or an unreadable store never takes the launcher down: calls answer `{ok:false,error}`, and the store goes read-only without overwriting the file, then recovers when the file is fixed. `node --test tests/` covers the registry, paths, migrations and logging.
 
 ### Phase 0 (original Tauri plan, superseded for Omarchy)
 - Tauri app with a main window. Hidden at start, toggled by `<app> toggle` (D-Bus single instance).
