@@ -30,7 +30,7 @@ Needs Python 3.11+, `nc` (netcat-openbsd), `xclip`, `xdg-open` and `notify-send`
 
 ```sh
 git clone https://github.com/ll931217/i3-cast.git && cd i3-cast
-python3 -m venv .venv && .venv/bin/pip install -r host/requirements.txt
+uv sync
 bin/x-cast setup i3      # symlink ~/.local/bin/x-cast, bind $mod+d (your old $mod+d line is commented out)
 bin/x-cast doctor        # check the pieces
 ```

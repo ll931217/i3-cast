@@ -34,7 +34,7 @@ USAGE
 die() { echo "x-cast: $*" >&2; exit 1; }
 
 start_host() {
-  [[ -x $python ]] || die "no $python; run: python3 -m venv .venv && .venv/bin/pip install -r host/requirements.txt"
+  [[ -x $python ]] || die "no $python; run: uv sync"
   setsid "$python" "$repo/host/main.py" >/dev/null 2>&1 &
   for _ in {1..50}; do [[ -S $sock ]] && return; sleep 0.1; done
   die "the host did not start; run 'x-cast host' to see why"
@@ -135,7 +135,7 @@ cmd_doctor() {
   }
   echo "x-cast doctor"
   check "X11 session (DISPLAY set)" test -n "${DISPLAY:-}"
-  check "python venv at $python" test -x "$python"
+  check "python env at $python (uv sync)" test -x "$python"
   check "PySide6 and PyYAML import" "$python" -c "import PySide6, yaml"
   check "nc (socket client)" command -v nc
   check "xdg-open (web search rows)" command -v xdg-open
