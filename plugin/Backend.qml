@@ -14,6 +14,7 @@ import "core/Providers.js" as Providers
 import "core/AppsProvider.js" as AppsProvider
 import "core/WebSearchProvider.js" as WebSearchProvider
 import "core/ExternalProvider.js" as ExternalProvider
+import "core/SettingsProvider.js" as SettingsProvider
 import "services"
 
 // The clone's backend, in-process (SPEC §2.0). It owns the paths, the host
@@ -131,6 +132,7 @@ Item {
   function registerProviders() {
     Providers.register(backend.providerRegistry, AppsProvider.createAppsProvider(backend.services))
     Providers.register(backend.providerRegistry, WebSearchProvider.createWebSearchProvider(backend.services))
+    Providers.register(backend.providerRegistry, SettingsProvider.createSettingsProvider())
     // Python plugins from the host (host/plugins.py).
     JSON.parse(PluginHost.providers()).forEach(function(info) {
       Providers.register(backend.providerRegistry, ExternalProvider.createExternalProvider(PluginHost, info))
@@ -240,7 +242,9 @@ Item {
           methods: Rpc.methods(backend.registry)
         }
       },
-      getPaths: function() { return backend.paths }
+      getPaths: function() { return backend.paths },
+      copyText: function(data) { backend.copyText(String(data && data.text || "")); return null },
+      openUrl: function(data) { backend.openUrl(String(data && data.url || "")); return null }
     })
 
     Rpc.register(backend.registry, "settings", {
@@ -261,6 +265,20 @@ Item {
         settingsStore.update(function(doc) { for (var k in patch) doc.general[k] = patch[k] })
         backend.emit("settings.generalSettingsChanged", settingsStore.doc.general)
         return settingsStore.doc.general
+      },
+      // Every command including disabled ones, for the settings window.
+      listCommands: function() {
+        var commands = settingsStore.doc.commands
+        return backend.candidates.map(function(c) {
+          var s = commands[c.id] || {}
+          return { id: c.id, title: c.title, typeLabel: c.typeLabel || "", provider: c.provider || "",
+                   enabled: s.enabled !== false, alias: s.alias || "", favorite: typeof s.favoriteOrder === "number" }
+        })
+      },
+      listProviders: function() {
+        return backend.providerRegistry.order.map(function(id) {
+          return { id: id, commands: backend.candidates.filter(function(c) { return c.provider === id }).length }
+        })
       },
       getAllCommandSettings: function() { return settingsStore.doc.commands },
       getCommandSettings: function(data) { return settingsStore.doc.commands[String(data && data.commandId || "")] || {} },
@@ -289,11 +307,14 @@ Item {
       // {query} -> sections of plain rows.
       search: function(data) {
         var query = String(data && data.query || "")
-        var sections = RootSearch.rootSections(backend.candidates, query, backend.searchContext(), backend.deps)
+        var pool = RootSearch.filterByType(backend.candidates, String(data && data.filter || ""))
+        var sections = RootSearch.rootSections(pool, query, backend.searchContext(), backend.deps)
         return sections.map(function(s) {
           return { id: s.id, title: s.title, rows: s.rows.map(function(r) { return r.candidate }) }
         })
       },
+      // The root view's dropdown (Ctrl+P): [{id, title}].
+      getFilters: function() { return RootSearch.typeFilters(backend.candidates) },
       getActions: function(data) {
         var candidate = backend.candidateFor(String(data && data.id || ""))
         if (!candidate) throw new Error("Unknown command " + (data && data.id))

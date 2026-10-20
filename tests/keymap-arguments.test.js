@@ -86,3 +86,14 @@ test("settings provider asks the UI to open the settings window", () => {
   assert.deepStrictEqual(p.perform(p.candidates()[0], "open"), { close: true, settings: true, visit: true })
   assert.strictEqual(p.perform(p.candidates()[0], "nope"), undefined)
 })
+
+test("every settings field is a real general setting whose options match its default's type", () => {
+  const Schema = require("../plugin/core/Schema.js")
+  const defaults = Schema.settingsMigrations[0].up({}).general
+  for (const f of Schema.generalFields) {
+    assert.notStrictEqual(defaults[f.key], undefined, f.key)
+    assert.ok(f.options.includes(defaults[f.key]), f.key + " default is one of its options")
+    for (const o of f.options) assert.strictEqual(typeof o, typeof defaults[f.key], f.key)
+  }
+  assert.strictEqual(Schema.generalFields.length, Object.keys(defaults).length)
+})

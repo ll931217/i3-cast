@@ -42,6 +42,11 @@ Item {
     root.close()
   }
 
+  function openSettings() {
+    root.hide()
+    settingsWindow.shown = true
+  }
+
   function toggle() {
     if (root.opened) root.hide()
     else root.show()
@@ -59,6 +64,7 @@ Item {
       launcher.push(outcome.push)
     } else if (outcome.close) {
       root.hide()
+      if (outcome.settings) root.openSettings()
       if (outcome.hud) launcher.hud(outcome.hud)
     }
     return r
@@ -75,6 +81,12 @@ Item {
     backend: backend
     appLibrary: backend.appLibrary
     onDismissRequested: root.hide()
+    onSettingsRequested: root.openSettings()
+  }
+
+  SettingsWindow {
+    id: settingsWindow
+    backend: backend
   }
 
   ShellIpc {
@@ -93,6 +105,11 @@ Item {
     function hide(): string {
       root.hide()
       return "hidden"
+    }
+
+    function settings(): string {
+      root.openSettings()
+      return "settings"
     }
 
     function isOpen(): string {

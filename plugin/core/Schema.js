@@ -74,6 +74,18 @@ var generalTypes = {
   rootSearchSensitivity: ["low", "medium", "high"]
 }
 
+// The settings window is generated from this: one row per field, cycling through `options`.
+var generalFields = [
+  { key: "windowMode", title: "Window mode", options: generalTypes.windowMode },
+  { key: "showFavoritesInCompactMode", title: "Show favorites in compact mode", options: [true, false] },
+  { key: "windowPresentationMode", title: "Open on", options: generalTypes.windowPresentationMode },
+  { key: "popToRootTimeout", title: "Return to root after (seconds)", options: [0, 5, 15, 30, 60, 90, 120, 180] },
+  { key: "escapeKeyBehavior", title: "Escape key", options: generalTypes.escapeKeyBehavior },
+  { key: "navigationBindings", title: "Navigation keys", options: generalTypes.navigationBindings },
+  { key: "rootSearchSensitivity", title: "Search sensitivity", options: generalTypes.rootSearchSensitivity },
+  { key: "uiZoom", title: "Interface zoom", options: [0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5] }
+]
+
 // Keep only general overrides that match the shipped defaults in type (and enum value).
 function validGeneral(value, defaults) {
   var out = {}
@@ -118,6 +130,8 @@ if (typeof module !== "undefined") {
     documents: documents,
     configDefaults: configDefaults,
     withConfigDefaults: withConfigDefaults,
-    validFallbacks: validFallbacks
+    validFallbacks: validFallbacks,
+    generalFields: generalFields,
+    generalTypes: generalTypes
   }
 }

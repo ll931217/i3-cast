@@ -15,6 +15,7 @@ usage() {
 Usage: x-cast <command> [args]
 
   toggle | show | hide   Show or hide the launcher
+  settings               Open the settings window
   run <commandId>        Open a command directly, e.g. app:firefox
   call <method> [json]   Call a backend method, e.g. x-cast call system.info
   host                   Run the host in the foreground (logs on the terminal)
@@ -72,7 +73,7 @@ cmd_doctor() {
 }
 
 case "${1:-}" in
-  toggle|show|hide) ipc "$1" >/dev/null ;;
+  toggle|show|hide|settings) ipc "$1" >/dev/null ;;
   run) [[ -n ${2:-} ]] || die "usage: x-cast run <commandId>"; ipc run "$2" ;;
   call) [[ -n ${2:-} ]] || die "usage: x-cast call <method> [json]"; ipc call "$2" "${3:-}" ;;
   ping) ipc ping ;;

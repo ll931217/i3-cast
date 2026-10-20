@@ -230,7 +230,8 @@ class PluginHost(QObject):
             outcome = self._providers[provider_id].perform(candidate, action, ctx)
         except Exception as e:
             self._record(provider_id, "perform", traceback.format_exc())
-            outcome = {"toast": {"style": "failure", "title": "%s failed: %s" % (candidate.get("title"), e)}}
+            message = "%s failed: %s" % (candidate.get("title"), e)
+            outcome = {"toast": {"style": "failure", "title": message, "actions": [{"title": "Copy Error", "copy": message}]}}
         return json.dumps(outcome if isinstance(outcome, dict) else None)
 
     @staticmethod

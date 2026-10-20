@@ -3,6 +3,8 @@ import Quickshell
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "../core/Keymap.js" as Keymap
+import "../core/Arguments.js" as Args
 
 // Launcher surface (SPEC §5.1, §10.2): 750×475 at uiZoom 1, 66 px search
 // header, 42 px footer, centred horizontally about a quarter down the
@@ -16,6 +18,7 @@ OverlayWindow {
   property var appLibrary: null
 
   signal dismissRequested()
+  signal settingsRequested()
 
   // ------------------------------------------------------------ settings
   readonly property var general: {
@@ -46,6 +49,19 @@ OverlayWindow {
   property var actions: []
   property var toast: null
   property int historyIndex: -1
+  // What the open panel lists: the row's actions, the root dropdown, or the toast's actions.
+  property string panelMode: "actions"
+  property string typeFilter: ""
+  property var filters: []
+  property var argValues: []
+  property int argFocus: -1
+
+  readonly property var argSpecs: window.selectedRow && window.selectedRow.argsJson ? JSON.parse(window.selectedRow.argsJson) : []
+  readonly property bool hasDropdown: window.atRoot && window.filters.length > 2
+  readonly property string filterTitle: {
+    for (var i = 0; i < window.filters.length; i++) if (window.filters[i].id === window.typeFilter) return window.filters[i].title
+    return "All"
+  }
 
   readonly property bool atRoot: window.stack.length === 1
   readonly property bool compact: window.general.windowMode === "compact" && window.atRoot && !window.query
@@ -93,6 +109,7 @@ OverlayWindow {
   function popToRoot() {
     window.stack = [{ kind: "root", title: "x-cast", query: "" }]
     window.query = ""
+    window.typeFilter = ""
     window.rebuild(true)
   }
 
@@ -123,7 +140,9 @@ OverlayWindow {
     var keepId = !resetSelection && window.selectedRow ? window.selectedRow.itemId : ""
     rows.clear()
     if (window.view.kind === "alias") { window.select(-1); return }
-    var result = window.backend.callSync("rootSearch.search", { query: window.query, view: window.view })
+    var f = window.backend.callSync("rootSearch.getFilters", null)
+    window.filters = f.ok ? f.data : []
+    var result = window.backend.callSync("rootSearch.search", { query: window.query, view: window.view, filter: window.typeFilter })
     if (!result.ok) {
       window.showToast("failure", result.error)
       window.select(-1)
@@ -154,7 +173,8 @@ OverlayWindow {
       alias: String(c.alias || ""),
       checked: !!c.checked,
       disabled: !!c.disabled,
-      favorite: typeof c.favoriteOrder === "number"
+      favorite: typeof c.favoriteOrder === "number",
+      argsJson: c.arguments && c.arguments.length ? JSON.stringify(c.arguments) : ""
     }
   }
 
@@ -165,8 +185,13 @@ OverlayWindow {
   }
 
   function select(index) {
+    var previous = window.selectedRow ? window.selectedRow.itemId : ""
     window.selectedIndex = index
     window.selectedRow = index >= 0 && index < rows.count ? rows.get(index) : null
+    if ((window.selectedRow ? window.selectedRow.itemId : "") !== previous) {
+      window.argValues = Args.initialValues(window.argSpecs)
+      window.argFocus = -1
+    }
     if (index >= 0) list.positionViewAtIndex(index, ListView.Contain)
     if (index === window.nextSelectable(-1, 1)) list.positionViewAtBeginning()
   }
@@ -217,11 +242,12 @@ OverlayWindow {
     if (!window.selectedRow) return
     var id = window.selectedRow.itemId
     window.actionPanelOpen = false
-    var r = window.backend.callSync("rootSearch.performAction", { id: id, action: actionId, query: window.query })
-    if (!r.ok) { window.showToast("failure", r.error); return }
+    var r = window.backend.callSync("rootSearch.performAction", { id: id, action: actionId, query: window.query, arguments: window.argValues })
+    if (!r.ok) { window.showToast("failure", r.error, [{ title: "Copy Error", copy: r.error }]); return }
     var outcome = r.data || {}
     if (outcome.push) { window.push(outcome.push); return }
     if (outcome.close) {
+      if (outcome.settings) window.settingsRequested()
       if (outcome.hud) window.hud(outcome.hud)
       window.dismissRequested()
       // [I] A launch clears the root search, so the next open starts fresh
@@ -230,7 +256,11 @@ OverlayWindow {
       if (window.atRoot) window.setQuery("")
       return
     }
-    if (outcome.toast) window.showToast(outcome.toast.style, outcome.toast.title)
+    if (outcome.toast) {
+      window.showToast(outcome.toast.style, outcome.toast.title, outcome.toast.actions)
+      var missing = Args.missingRequired(window.argValues, window.argSpecs)
+      if (missing >= 0) window.argFocus = missing
+    }
     window.rebuild(false)
   }
 
@@ -246,11 +276,33 @@ OverlayWindow {
     return false
   }
 
-  function toggleActionPanel() {
-    if (window.actionPanelOpen) { window.actionPanelOpen = false; return }
-    window.actions = window.actionsForSelected()
+  // One panel, three lists. Asking for the mode that is already open closes it.
+  function togglePanel(mode) {
+    if (window.actionPanelOpen && window.panelMode === mode) { window.actionPanelOpen = false; return }
+    var list = []
+    if (mode === "actions") list = window.actionsForSelected()
+    else if (mode === "dropdown") list = window.filters.map(function(f) { return { id: f.id, title: f.title, icon: f.id === window.typeFilter ? "\uf00c" : "" } })
+    else if (mode === "toast" && window.toast && window.toast.actions)
+      list = window.toast.actions.map(function(a, i) { return { id: String(i), title: a.title, icon: "" } })
+    window.panelMode = mode
+    window.actions = list
     actionPanel.filter = ""
-    window.actionPanelOpen = window.actions.length > 0
+    window.actionPanelOpen = list.length > 0
+  }
+
+  function panelActivated(id) {
+    var mode = window.panelMode
+    window.actionPanelOpen = false
+    if (mode === "dropdown") { window.typeFilter = id; window.rebuild(true) }
+    else if (mode === "toast") window.runToastAction(window.toast.actions[Number(id)])
+    else window.perform(id)
+  }
+
+  // A toast action is data: {title, copy: text} or {title, open: url}.
+  function runToastAction(action) {
+    if (!action) return
+    if (action.copy !== undefined) window.backend.callSync("system.copyText", { text: action.copy })
+    else if (action.open) window.backend.callSync("system.openUrl", { url: action.open })
   }
 
   function saveAlias() {
@@ -264,8 +316,9 @@ OverlayWindow {
 
   // ------------------------------------------------------------ feedback
 
-  function showToast(style, title) {
-    window.toast = { style: style, title: String(title || "") }
+  function showToast(style, title, actions) {
+    window.toast = { style: style, title: String(title || ""), actions: actions && actions.length ? actions : null }
+    toastTimer.interval = window.toast.actions ? 6000 : 2500
     toastTimer.restart()
   }
 
@@ -327,6 +380,8 @@ OverlayWindow {
     var alt = (event.modifiers & Qt.AltModifier) !== 0
     var key = event.key
     var enter = key === Qt.Key_Return || key === Qt.Key_Enter
+    var cmd = window.view.kind === "alias" ? "" : Keymap.resolve(window.general.navigationBindings,
+      { ctrl: ctrl, shift: shift, alt: alt }, window.keyName(key), window.hasDropdown)
 
     if (key === Qt.Key_Escape) { window.handleEscape(shift); return true }
     // Zoom in / out / reset (SPEC §10.3), persisted as uiZoom. [I] step 0.1
@@ -336,9 +391,10 @@ OverlayWindow {
     if (ctrl && key === Qt.Key_BracketLeft) { window.pop(); return true }
 
     if (window.actionPanelOpen) {
-      if (ctrl && key === Qt.Key_K) { window.actionPanelOpen = false; return true }
-      if (key === Qt.Key_Down || (ctrl && key === Qt.Key_N)) { actionPanel.move(1); return true }
-      if (key === Qt.Key_Up || (ctrl && key === Qt.Key_P)) { actionPanel.move(-1); return true }
+      var closes = { actions: "actions", dropdown: "dropdown", toast: "toast" }
+      if (closes[cmd] === window.panelMode) { window.actionPanelOpen = false; return true }
+      if (key === Qt.Key_Down || cmd === "down") { actionPanel.move(1); return true }
+      if (key === Qt.Key_Up || cmd === "up" || (ctrl && key === Qt.Key_P)) { actionPanel.move(-1); return true }
       if (enter) { actionPanel.activateSelected(); return true }
       if (Util.editsFilter(event, actionPanel.filter)) { actionPanel.filter = Util.editedFilter(event, actionPanel.filter); return true }
       if (window.isTyping(event)) { actionPanel.filter += event.text; return true }
@@ -349,7 +405,15 @@ OverlayWindow {
       if (enter) { window.saveAlias(); return true }
       if (key === Qt.Key_Space) return true
     } else {
-      if (ctrl && key === Qt.Key_K) { window.toggleActionPanel(); return true }
+      if (cmd === "actions") { window.togglePanel("actions"); return true }
+      if (cmd === "dropdown") { window.togglePanel("dropdown"); return true }
+      if (cmd === "toast") { window.togglePanel("toast"); return true }
+      if (cmd === "back") { window.pop(); return true }
+      if (cmd === "open") { window.performNth(0); return true }
+      if (key === Qt.Key_Tab || key === Qt.Key_Backtab) {
+        if (window.argSpecs.length) window.argFocus = Args.stepFocus(window.argFocus, window.argSpecs.length, key === Qt.Key_Tab ? 1 : -1)
+        return true
+      }
       if (enter && ctrl && shift) { window.performNth(2); return true }
       if (enter && ctrl) { window.performNth(1); return true }
       if (enter) { window.performNth(0); return true }
@@ -357,11 +421,11 @@ OverlayWindow {
       if (ctrl && alt && key === Qt.Key_Down) { window.performIfOffered(["favorite-down"]); return true }
       if (ctrl && key === Qt.Key_Up) { window.jumpSection(-1); return true }
       if (ctrl && key === Qt.Key_Down) { window.jumpSection(1); return true }
-      if (key === Qt.Key_Up || (ctrl && key === Qt.Key_P)) {
+      if (key === Qt.Key_Up || cmd === "up") {
         if (window.atRoot && (window.query === "" || window.historyIndex >= 0) && window.selectedIndex === window.nextSelectable(-1, 1) && window.recallHistory(1)) return true
         window.move(-1); return true
       }
-      if (key === Qt.Key_Down || (ctrl && key === Qt.Key_N)) {
+      if (key === Qt.Key_Down || cmd === "down") {
         if (window.historyIndex >= 0) { window.recallHistory(-1); return true }
         window.move(1); return true
       }
@@ -377,9 +441,34 @@ OverlayWindow {
       }
     }
 
+    if (window.argFocus >= 0 && window.view.kind !== "alias" && window.editPill(event, key)) return true
     if (Util.editsFilter(event, window.query)) { window.setQuery(Util.editedFilter(event, window.query)); return true }
     if (key === Qt.Key_Backspace && !window.query && !window.atRoot) { window.pop(); return true }
     if (window.isTyping(event)) { window.setQuery(window.query + event.text); return true }
+    return false
+  }
+
+  function keyName(key) {
+    return key >= Qt.Key_A && key <= Qt.Key_Z ? String.fromCharCode(97 + key - Qt.Key_A) : ""
+  }
+
+  // Keys while a pill has focus. Returns true when the key was used.
+  function editPill(event, key) {
+    var i = window.argFocus
+    if (key === Qt.Key_Backspace) {
+      if (window.argValues[i]) window.argValues = Args.backspace(window.argValues, i)
+      else window.argFocus = i - 1
+      return true
+    }
+    if (key === Qt.Key_Left || key === Qt.Key_Right) {
+      window.argValues = Args.cycle(window.argValues, i, window.argSpecs, key === Qt.Key_Right ? 1 : -1)
+      return true
+    }
+    if (window.isTyping(event)) {
+      if (key === Qt.Key_Space && window.argSpecs[i].type === "dropdown") window.argValues = Args.cycle(window.argValues, i, window.argSpecs, 1)
+      else window.argValues = Args.typeText(window.argValues, i, window.argSpecs, event.text)
+      return true
+    }
     return false
   }
 
@@ -467,8 +556,8 @@ OverlayWindow {
         textFormat: Text.PlainText
         anchors.left: lead.right
         anchors.leftMargin: window.px(12)
-        anchors.right: parent.right
-        anchors.rightMargin: window.px(20)
+        anchors.right: chips.left
+        anchors.rightMargin: window.px(12)
         anchors.verticalCenter: parent.verticalCenter
         text: window.query || window.placeholder
         color: window.look.foreground
@@ -484,7 +573,7 @@ OverlayWindow {
         anchors.verticalCenter: parent.verticalCenter
         x: queryText.x + (window.query ? Math.min(queryText.contentWidth, queryText.width) + Style.space(1) : 0)
         color: window.look.accent
-        visible: window.shown && !window.actionPanelOpen
+        visible: window.shown && !window.actionPanelOpen && window.argFocus < 0
 
         SequentialAnimation on opacity {
           running: window.shown
@@ -493,6 +582,64 @@ OverlayWindow {
           PauseAnimation { duration: 530 }
           NumberAnimation { to: 0; duration: 0 }
           PauseAnimation { duration: 530 }
+        }
+      }
+    }
+
+    // Right of the search text: the type filter, then one pill per argument.
+    Row {
+      id: chips
+      parent: header
+      anchors.right: parent.right
+      anchors.rightMargin: window.px(20)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: window.px(6)
+
+      Rectangle {
+        visible: window.hasDropdown && window.view.kind !== "alias"
+        height: window.px(24)
+        width: filterLabel.implicitWidth + window.px(16)
+        radius: window.px(6)
+        color: Util.alpha(window.look.foreground, window.typeFilter ? 0.14 : 0.06)
+        Text {
+          id: filterLabel
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: window.filterTitle + " ▾"
+          color: window.look.foreground
+          opacity: window.typeFilter ? 1 : 0.6
+          font.family: window.look.fontFamily
+          font.pixelSize: Math.round(Style.font.bodySmall * window.zoom)
+        }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: window.togglePanel("dropdown") }
+      }
+
+      Repeater {
+        model: window.view.kind === "alias" ? [] : window.argSpecs
+        delegate: Rectangle {
+          required property var modelData
+          required property int index
+          readonly property var shown: Args.display(modelData, window.argValues[index] || "")
+          height: window.px(24)
+          width: Math.min(window.px(170), pillText.implicitWidth + window.px(16))
+          radius: window.px(6)
+          color: Util.alpha(window.look.foreground, 0.08)
+          border.width: window.argFocus === index ? 1 : 0
+          border.color: window.look.accent
+          Text {
+            id: pillText
+            anchors.centerIn: parent
+            width: parent.width - window.px(12)
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: parent.shown.text
+            color: window.look.foreground
+            opacity: parent.shown.empty ? 0.5 : 1
+            font.family: window.look.fontFamily
+            font.pixelSize: Math.round(Style.font.bodySmall * window.zoom)
+          }
+          MouseArea { anchors.fill: parent; onClicked: window.argFocus = index }
         }
       }
     }
@@ -605,7 +752,7 @@ OverlayWindow {
         Text {
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
-          text: window.toast ? window.toast.title : window.view.title
+          text: window.toast ? window.toast.title + (window.toast.actions ? "   Ctrl T for actions" : "") : window.view.title
           color: window.look.foreground
           opacity: window.toast ? 0.9 : 0.6
           font.family: window.look.fontFamily
@@ -665,7 +812,7 @@ OverlayWindow {
         KeyHint {
           visible: window.view.kind !== "alias"
           anchors.verticalCenter: parent.verticalCenter
-          keys: "Ctrl K"
+          keys: window.general.navigationBindings === "vim-motions" ? "Ctrl Shift K" : "Ctrl K"
           color: window.look.foreground
           zoom: window.zoom
         }
@@ -678,12 +825,12 @@ OverlayWindow {
       z: 10
       anchors.right: parent.right
       anchors.rightMargin: card.borderRight + window.px(10)
-      anchors.bottom: footer.top
-      anchors.bottomMargin: window.px(6)
+      y: window.panelMode === "dropdown" ? card.borderTop + window.headerHeight + window.px(4)
+        : parent.height - card.borderBottom - window.footerHeight - height - window.px(6)
       actions: window.actions
       look: window.look
       zoom: window.zoom
-      onActivated: function(actionId) { window.perform(actionId) }
+      onActivated: function(actionId) { window.panelActivated(actionId) }
     }
   }
 }

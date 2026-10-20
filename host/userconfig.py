@@ -15,13 +15,16 @@ CONFIG_EXAMPLE = """\
 log_level: info                   # trace | debug | info | warning | error | fatal
 keep_visible_on_focus_loss: false # keep the window open when it loses focus (for debugging)
 
-general:
-  window_mode: expanded           # expanded | compact (compact shows only the search box until you type)
-  window_presentation_mode: mouse-screen  # mouse-screen | active-screen | primary-screen
-  pop_to_root_timeout: 90         # seconds before a hidden launcher returns to the root view; 0 = always
-  escape_key_behavior: pop-back-or-close  # pop-back-or-close | close-and-pop-to-root
-  root_search_sensitivity: medium # low | medium | high
-  ui_zoom: 1                      # scales the whole window
+# These are the defaults. The settings window (x-cast settings) changes them; a value
+# uncommented here wins over the window and locks that row.
+# general:
+#   window_mode: expanded           # expanded | compact (compact shows only the search box until you type)
+#   window_presentation_mode: mouse-screen  # mouse-screen | active-screen | primary-screen
+#   pop_to_root_timeout: 90         # seconds before a hidden launcher returns to the root view; 0 = always
+#   escape_key_behavior: pop-back-or-close  # pop-back-or-close | close-and-pop-to-root
+#   navigation_bindings: emacs      # emacs | vim-motions (Ctrl+J/K/H/L; actions move to Ctrl+Shift+K)
+#   root_search_sensitivity: medium # low | medium | high
+#   ui_zoom: 1                      # scales the whole window
 
 # "Use <query> with..." rows. {query} is replaced by the URL-encoded search text.
 # Leave commented out to keep Google and DuckDuckGo.
@@ -126,7 +129,7 @@ def alacritty_colors(path):
         "text": pick("primary", "foreground"),
         "selectedText": pick("cursor", "cursor") or pick("normal", "blue"),
         "selectedBackground": pick("selection", "background"),
-        "border": pick("normal", "black"),
+        "border": pick("cursor", "cursor") or pick("normal", "black"),  # [D] the accent outlines the card
         "error": pick("normal", "red"),
     }
     return {k: v for k, v in derived.items() if v}
