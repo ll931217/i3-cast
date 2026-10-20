@@ -56,6 +56,7 @@ def normalize_candidate(provider_id, raw, searching_only=False):
         "iconName": str(raw.get("icon") or ""),
         "glyph": str(raw.get("glyph") or ""),
         "arguments": normalize_arguments(raw.get("arguments")),
+        "category": str(raw.get("category") or ""),
         "data": raw.get("data"),
         "rootSearch": {"when": "searching" if searching_only else raw.get("root", "always")},
     }
@@ -189,8 +190,15 @@ class PluginHost(QObject):
 
     @Slot(result=str)
     def providers(self):
-        return json.dumps([{"id": pid, "hasFallbacks": callable(getattr(p, "fallbacks", None))}
+        return json.dumps([{"id": pid, "hasFallbacks": callable(getattr(p, "fallbacks", None)),
+                            "hasFilters": callable(getattr(p, "filters", None))}
                            for pid, p in self._providers.items()])
+
+    @Slot(str, result=str)
+    def filters(self, provider_id):
+        rows = self._call(provider_id, "filters", lambda p: p.filters(), [])
+        return json.dumps([{"id": str(f["id"]), "title": str(f.get("title") or f["id"])}
+                           for f in rows or [] if isinstance(f, dict) and "id" in f])
 
     @Slot(str, result=str)
     def candidates(self, provider_id):

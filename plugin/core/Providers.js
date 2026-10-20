@@ -11,6 +11,8 @@
 //                                   -> outcome {close, push, toast, hud, visit} or undefined
 //                                   when the action is not the provider's (generic actions follow)
 //   fallbacks(query)                optional: rows for the "Use … with…" section
+//   filters()                       optional: [{id, title}] entries for the Ctrl+P dropdown; a
+//                                   candidate belongs to one by carrying `category` = id
 //
 // Loaded by QML and node --test, so no imports; QML wires dependencies in.
 
@@ -82,6 +84,19 @@ function fallbacks(registry, query) {
   return out
 }
 
+// Dropdown entries from every provider, as {id: "@<provider>:<id>", title, provider}.
+function filters(registry) {
+  var out = []
+  for (var i = 0; i < registry.order.length; i++) {
+    var id = registry.order[i]
+    var provider = registry.providers[id]
+    if (typeof provider.filters !== "function") continue
+    var items = guarded(registry, id, "filters", function() { return provider.filters() }, [])
+    items.forEach(function(f) { if (f && f.id) out.push({ id: "@" + id + ":" + f.id, title: String(f.title || f.id), provider: id }) })
+  }
+  return out
+}
+
 function findFallback(registry, id) {
   var rows = fallbacks(registry, "")
   for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]
@@ -108,6 +123,7 @@ if (typeof module !== "undefined") {
     get: get,
     candidates: candidates,
     fallbacks: fallbacks,
+    filters: filters,
     findFallback: findFallback,
     actionsFor: actionsFor,
     perform: perform

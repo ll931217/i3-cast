@@ -314,7 +314,7 @@ Item {
         })
       },
       // The root view's dropdown (Ctrl+P): [{id, title}].
-      getFilters: function() { return RootSearch.typeFilters(backend.candidates) },
+      getFilters: function() { return RootSearch.typeFilters(backend.candidates, Providers.filters(backend.providerRegistry)) },
       getActions: function(data) {
         var candidate = backend.candidateFor(String(data && data.id || ""))
         if (!candidate) throw new Error("Unknown command " + (data && data.id))

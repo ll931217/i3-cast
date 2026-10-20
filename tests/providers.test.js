@@ -78,3 +78,14 @@ test("web search offers fallbacks only, and opens the encoded url", () => {
   P.perform(reg, rows[0], "open", { query: "a b" })
   assert.deepEqual(opened, ["https://www.google.com/search?q=a%20b"])
 })
+
+test("filters() collects provider dropdown entries and skips a throwing provider", () => {
+  const P = require("../plugin/core/Providers.js")
+  const reg = P.createRegistry()
+  const base = { candidates: () => [], actionsFor: () => [], perform: () => undefined }
+  P.register(reg, Object.assign({ id: "a", filters: () => [{ id: "x", title: "X" }] }, base))
+  P.register(reg, Object.assign({ id: "b", filters: () => { throw new Error("no") } }, base))
+  P.register(reg, Object.assign({ id: "c" }, base))
+  assert.deepStrictEqual(P.filters(reg), [{ id: "@a:x", title: "X", provider: "a" }])
+  assert.strictEqual(reg.errors.length, 1)
+})

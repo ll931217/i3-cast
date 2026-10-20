@@ -123,7 +123,7 @@ function reorderFavorites(commands, id, action) {
 }
 
 // Root view dropdown (Ctrl+P): one entry per candidate type, "All" first. [D]
-function typeFilters(candidates) {
+function typeFilters(candidates, extra) {
   var seen = {}
   var labels = []
   for (var i = 0; i < candidates.length; i++) {
@@ -131,11 +131,19 @@ function typeFilters(candidates) {
     if (label && !seen[label]) { seen[label] = true; labels.push(label) }
   }
   labels.sort()
-  return [{ id: "", title: "All" }].concat(labels.map(function(label) { return { id: label, title: label } }))
+  var types = labels.map(function(label) { return { id: label, title: label } })
+  return [{ id: "", title: "All" }].concat(types, (extra || []).map(function(f) { return { id: f.id, title: f.title } }))
 }
 
 function filterByType(candidates, typeId) {
   if (!typeId) return candidates
+  // "@<provider>:<category>" comes from a provider's own filters().
+  if (typeId.charAt(0) === "@") {
+    var at = typeId.indexOf(":")
+    var provider = typeId.slice(1, at)
+    var category = typeId.slice(at + 1)
+    return candidates.filter(function(c) { return c.provider === provider && c.category === category })
+  }
   return candidates.filter(function(c) { return c.typeLabel === typeId })
 }
 

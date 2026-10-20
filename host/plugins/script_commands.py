@@ -5,13 +5,16 @@ Scripts live in ~/.config/x-cast/script-commands (non-recursive). Metadata is re
 format, so scripts from raycast/script-commands work unchanged.
 
 Supported: title, mode, packageName, icon, description, currentDirectoryPath, argument1..3.
-[D] Every mode runs in the background and reports its last output line as a notice:
-fullOutput, compact and silent behave alike; inline refresh and needsConfirmation are ignored.
+[D] compact, silent and fullOutput run in the background and report the last output line as a
+notification. `inline` shows the last output line as the row's subtitle and re-runs it every
+`refreshTime` (10s, 5m, 1h, 1d; at least 10s). `needsConfirmation true` asks for a second Enter
+within 5 seconds.
 """
 import json
 import os
 import re
 import subprocess
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -20,6 +23,19 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 MAX_BYTES = 2 * 1024 * 1024
 HEADER_LINES = 60
 TIMEOUT_SECONDS = 120
+MIN_REFRESH_SECONDS = 10
+CONFIRM_WINDOW_SECONDS = 5
+REFRESH = re.compile(r"^(\d+)\s*([smhd])$")
+UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_refresh(value):
+    """Seconds between inline runs, or None when missing or invalid."""
+    m = REFRESH.match((value or "").strip())
+    if not m:
+        return None
+    seconds = int(m.group(1)) * UNITS[m.group(2)]
+    return seconds if seconds >= MIN_REFRESH_SECONDS else None
 
 
 def parse_header(text):
@@ -54,11 +70,17 @@ def parse_script(path, text):
             "percentEncoded": bool(spec.get("percentEncoded", False)),
             "data": [d.get("value", d.get("title")) if isinstance(d, dict) else d for d in spec.get("data", [])],
         })
+    mode = meta["mode"].replace("-", "").lower()
+    refresh = parse_refresh(meta.get("refreshtime"))
+    if mode == "inline" and (refresh is None or arguments):
+        return None
     package = meta.get("packagename") or path.parent.name.replace("-", " ").replace("_", " ").title()
     return {
         "path": str(path),
         "title": meta["title"],
-        "mode": meta["mode"].replace("-", "").lower(),
+        "mode": mode,
+        "refresh": refresh,
+        "confirm": meta.get("needsconfirmation", "").lower() == "true",
         "package": package,
         "icon": meta.get("icon", ""),
         "description": meta.get("description", ""),
@@ -121,6 +143,9 @@ class ScriptCommands:
 
     def __init__(self, api):
         self.api = api
+        self.inline = {}      # path -> (finished at, text)
+        self.running = set()  # inline paths being refreshed
+        self.pending = {}     # path -> when the first Enter happened
         settings = api.settings(self.id)
         configured = settings.get("directories")
         self.directories = [Path(d).expanduser() for d in configured] if isinstance(configured, list) and configured \
@@ -133,17 +158,39 @@ class ScriptCommands:
         rows = []
         for directory in self.directories:
             for script in scan(directory):
+                if script["mode"] == "inline":
+                    self.refresh_inline(script)
                 rows.append({
                     "id": script["path"],
                     "title": script["title"],
-                    "subtitle": script["package"],
+                    "subtitle": self.inline.get(script["path"], (0, ""))[1] or script["package"],
                     "keywords": [script["description"]] if script["description"] else [],
                     "type_label": "Script",
+                    "category": script["package"],
                     "icon": script["icon"] if script["icon"].startswith("/") else "",
                     "arguments": script["arguments"],
                     "data": script,
                 })
         return rows
+
+    def refresh_inline(self, script):
+        path = script["path"]
+        last = self.inline.get(path, (0, ""))[0]
+        if path in self.running or time.time() - last < script["refresh"]:
+            return
+        self.running.add(path)
+
+        def done(result):
+            self.running.discard(path)
+            ok, message = result if isinstance(result, tuple) else (False, str(result))
+            self.inline[path] = (time.time(), message)
+            self.api.changed()
+
+        self.api.run_in_background(lambda: run_script(script, []), done)
+
+    def filters(self):
+        packages = sorted({s["package"] for d in self.directories for s in scan(d)})
+        return [{"id": p, "title": p} for p in packages]
 
     def actions_for(self, candidate):
         return [{"id": "run", "title": "Run Script", "icon": ""}]
@@ -152,6 +199,11 @@ class ScriptCommands:
         if action not in ("run", "open"):
             return None
         script = candidate["data"]
+        if script["confirm"]:
+            first = self.pending.pop(script["path"], 0)
+            if time.time() - first > CONFIRM_WINDOW_SECONDS:
+                self.pending[script["path"]] = time.time()
+                return {"toast": {"style": "success", "title": "Press Enter again to run %s" % script["title"]}}
         try:
             args = build_args(script, ctx.get("arguments") or [])
         except ValueError as e:

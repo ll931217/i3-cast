@@ -85,3 +85,25 @@ class ScanAndRunTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InlineAndConfirmTests(unittest.TestCase):
+    BASE = "# @raycast.schemaVersion 1\n# @raycast.title T\n"
+
+    def test_parse_refresh(self):
+        self.assertEqual(sc.parse_refresh("10s"), 10)
+        self.assertEqual(sc.parse_refresh("5m"), 300)
+        self.assertEqual(sc.parse_refresh("1d"), 86400)
+        self.assertIsNone(sc.parse_refresh("5s"))
+        self.assertIsNone(sc.parse_refresh("soon"))
+
+    def test_inline_needs_a_valid_refresh_time_and_no_arguments(self):
+        p = Path("/x.sh")
+        self.assertIsNone(sc.parse_script(p, self.BASE + "# @raycast.mode inline\n"))
+        self.assertIsNone(sc.parse_script(p, self.BASE + "# @raycast.mode inline\n# @raycast.refreshTime 1m\n# @raycast.argument1 {\"type\": \"text\", \"placeholder\": \"a\"}\n"))
+        s = sc.parse_script(p, self.BASE + "# @raycast.mode inline\n# @raycast.refreshTime 1m\n")
+        self.assertEqual((s["mode"], s["refresh"]), ("inline", 60))
+
+    def test_needs_confirmation_flag(self):
+        s = sc.parse_script(Path("/x.sh"), self.BASE + "# @raycast.mode silent\n# @raycast.needsConfirmation true\n")
+        self.assertTrue(s["confirm"])

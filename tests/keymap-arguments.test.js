@@ -81,6 +81,17 @@ test("type filters list All then each type once", () => {
   assert.strictEqual(RootSearch.filterByType(cs, "").length, 3)
 })
 
+test("a provider's own filters pick candidates by provider and category", () => {
+  const cs = [
+    { provider: "script-commands", category: "Demo", typeLabel: "Script" },
+    { provider: "script-commands", category: "Other", typeLabel: "Script" },
+    { provider: "apps", category: "Demo", typeLabel: "Application" }
+  ]
+  const extra = [{ id: "@script-commands:Demo", title: "Demo" }]
+  assert.deepStrictEqual(RootSearch.typeFilters(cs, extra).map(f => f.id), ["", "Application", "Script", "@script-commands:Demo"])
+  assert.strictEqual(RootSearch.filterByType(cs, "@script-commands:Demo").length, 1)
+})
+
 test("settings provider asks the UI to open the settings window", () => {
   const p = createSettingsProvider()
   assert.deepStrictEqual(p.perform(p.candidates()[0], "open"), { close: true, settings: true, visit: true })
