@@ -22,6 +22,12 @@ def register(api):
     api.add_provider(Notes())
 ```
 
+## Adding, turning off and removing plugins
+
+- **Add.** Settings window, Plugins page: paste a path or an `https://` link to a `.py` file and press Add. The file is copied to `~/.config/x-cast/plugins/`, checked (valid Python, has `register(api)`, 1 MiB at most, a name of letters, digits and underscores) and loaded at once. Nothing is kept if loading fails. A plugin runs with your permissions, so add only code you trust.
+- **Turn off.** Each plugin has an Enabled button. It is remembered in `~/.local/share/x-cast/plugin-state.json`. In `config.yaml`, `plugins: {<provider id>: {enabled: false}}` also turns one off, and then the button is locked.
+- **Remove.** The Remove button (press twice) deletes a file you added. Plugins that ship with x-cast can only be turned off.
+
 ## Candidate fields
 
 `id` is required. The rest are optional.

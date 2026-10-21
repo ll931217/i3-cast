@@ -138,10 +138,19 @@ Item {
     Providers.register(backend.providerRegistry, AppsProvider.createAppsProvider(backend.services))
     Providers.register(backend.providerRegistry, WebSearchProvider.createWebSearchProvider(backend.services))
     Providers.register(backend.providerRegistry, SettingsProvider.createSettingsProvider())
-    // Python plugins from the host (host/plugins.py).
-    JSON.parse(PluginHost.providers()).forEach(function(info) {
+    backend.syncExternalProviders()
+  }
+
+  // Python plugins from the host (host/plugins.py). Called again whenever one is added, removed,
+  // turned on or off.
+  property var externalIds: []
+  function syncExternalProviders() {
+    backend.externalIds.forEach(function(id) { Providers.unregister(backend.providerRegistry, id) })
+    var infos = JSON.parse(PluginHost.providers())
+    infos.forEach(function(info) {
       Providers.register(backend.providerRegistry, ExternalProvider.createExternalProvider(PluginHost, info))
     })
+    backend.externalIds = infos.map(function(info) { return info.id })
   }
 
   // Display sessions own snapshots; ordinary searches never allocate or expire them.
@@ -421,7 +430,7 @@ Item {
 
   Connections {
     target: PluginHost
-    function onChanged() { rebuildTimer.restart() }
+    function onChanged() { backend.syncExternalProviders(); rebuildTimer.restart() }
   }
 
   // config.yaml is parsed by the host, which re-sends it on every save.

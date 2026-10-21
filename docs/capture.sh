@@ -16,6 +16,9 @@ command -v import >/dev/null && command -v montage >/dev/null || { echo "needs I
 
 # XDG_* stay as they are: fontconfig finds your Nerd Font through them.
 export X_CAST_CONFIG_DIR=$work/config
+export X_CAST_DATA_DIR=$work/data
+mkdir -p "$X_CAST_DATA_DIR"
+printf '%s' '[{"expression": "12*12", "answer": "144"}, {"expression": "2^16", "answer": "65536"}, {"expression": "20% of 50", "answer": "10"}]' >"$X_CAST_DATA_DIR/calculator-history.json"
 .venv/bin/python host/main.py >/dev/null 2>&1 &
 host_pid=$!
 for _ in {1..50}; do [[ -S $sock ]] && break; sleep 0.1; done
@@ -48,11 +51,25 @@ shot() { # shot <file> [query] [keys]
   xdotool key ctrl+u; $cli hide; sleep 0.3
 }
 
+settings_shot() { # settings_shot <file> <tabs to press>: the settings window, on its nth page
+  $cli settings; sleep 1
+  local w i; w=$(xdotool search --onlyvisible --name '^x-cast Settings$' | head -1)
+  xdotool windowfocus "$w"; sleep 0.4
+  [[ $(xdotool getactivewindow) == "$w" ]] || { echo "settings window is not focused; refusing to type" >&2; exit 1; }
+  for ((i = 0; i < $2; i++)); do xdotool key Tab; done
+  sleep 0.5
+  import -window "$w" "$1"
+  xdotool key Escape; sleep 0.3
+}
+
 theme "#1a1b26" "#c0caf5" "#7aa2f7" "#2a2e45" "#3b4261" "#e06c75"
 shot $out/hero.png
 shot $out/search.png term
 shot $out/actions.png alac ctrl+k
 shot $out/fallbacks.png wez
+shot $out/calculator.png "sqrt(144) * 3"
+settings_shot $out/settings.png 0
+settings_shot $out/plugins.png 2
 
 mkdir -p "$work/themes"
 i=0
